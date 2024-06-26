@@ -13,7 +13,8 @@ config.default_domain = 'WSL:Ubuntu'
 -- For example, changing the color scheme:
 
 config.color_scheme = 'Dracula'
-config.window_decorations = "RESIZE"
+config.window_decorations = "INTEGRATED_BUTTONS|RESIZE"
+
 
 wezterm.on("gui-startup", function()
   local tab, pane, window = mux.spawn_window{}
