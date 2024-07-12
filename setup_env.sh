@@ -32,6 +32,17 @@ function downloadAndInstall () {
   rm -rf $FOLDER
   return 0
 }
+function installFromThisRepo() {
+  curl -L -s "https://github.com/vekexasia/dotenv/raw/master/$1" -o "$HOME/$1"
+  if [ $? != 0 ]; then
+    echo "Failed to download $1"
+    return 1
+  fi
+  if [ "$2" == "x" ]; then
+    chmod +x "$HOME/$1"
+  fi
+}
+
 mkdir -p $HOME/.bin
 downloadAndInstall "jesseduffield/lazygit" "Linux_x86_64.tar.gz" "lazygit"
 downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
@@ -42,3 +53,5 @@ downloadAndInstall "sharkdp/bat" "x86_64-unknown-linux-gnu.tar.gz" "bat"
 patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
 patchBashrc "export PATH=\$PATH:\$HOME/.bin"
+
+installFromThisRepo ".vimrc"
