@@ -44,9 +44,9 @@ function installFromThisRepo() {
 }
 
 mkdir -p $HOME/.bin
+
 downloadAndInstall "jesseduffield/lazygit" "Linux_x86_64.tar.gz" "lazygit"
 downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
-
 downloadAndInstall "zellij-org/zellij" "unknown-linux-musl.tar.gz" "zellij"
 downloadAndInstall "sharkdp/bat" "x86_64-unknown-linux-gnu.tar.gz" "bat"
 
@@ -55,3 +55,8 @@ patchBashrc "export BAT_THEME=\"TwoDark\""
 patchBashrc "export PATH=\$PATH:\$HOME/.bin"
 
 installFromThisRepo ".vimrc"
+# check if vim is installed
+if ! command -v vim &> /dev/null; then
+  echo "Vim is not installed. Skipping vim setup"
+  sudo apt install vim
+fi
