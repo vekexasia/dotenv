@@ -59,6 +59,8 @@ patchBashrc "export PATH=\$PATH:\$HOME/.bin"
 patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
 
+curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
+    https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
 installFromThisRepo ".vimrc"
 # check if vim is installed
 if ! command -v vim &> /dev/null; then
