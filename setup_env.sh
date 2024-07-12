@@ -55,9 +55,9 @@ downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
 downloadAndInstall "zellij-org/zellij" "unknown-linux-musl.tar.gz" "zellij"
 downloadAndInstall "sharkdp/bat" "x86_64-unknown-linux-gnu.tar.gz" "bat"
 
+patchBashrc "export PATH=\$PATH:\$HOME/.bin"
 patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
-patchBashrc "export PATH=\$PATH:\$HOME/.bin"
 
 installFromThisRepo ".vimrc"
 # check if vim is installed
