@@ -45,6 +45,11 @@ function installFromThisRepo() {
 
 mkdir -p $HOME/.bin
 
+if ! command -v jq &> /dev/null; then
+  echo "jq is not installed. Installing jq"
+  sudo apt install jq -y
+fi
+
 downloadAndInstall "jesseduffield/lazygit" "Linux_x86_64.tar.gz" "lazygit"
 downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
 downloadAndInstall "zellij-org/zellij" "unknown-linux-musl.tar.gz" "zellij"
@@ -58,5 +63,5 @@ installFromThisRepo ".vimrc"
 # check if vim is installed
 if ! command -v vim &> /dev/null; then
   echo "Vim is not installed. Skipping vim setup"
-  sudo apt install vim
+  sudo apt install vim -y
 fi
