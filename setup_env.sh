@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
+function patchFile() {
+  # checks if line in $2 is in $1 and if not appends it
+  if ! grep -q "$2" "$1"; then
+    echo "$2" >> "$1"
+  fi
+}
 function patchBashrc() {
   # checks if line in $1 is in .bashrc and if not appends it
-  if ! grep -q "$1" ~/.bashrc; then
-    echo "$1" >> ~/.bashrc
-  fi
+  patchFile "$HOME/.bashrc" "$1"
 }
 
 function downloadFromGH () {
@@ -68,3 +72,25 @@ if ! command -v vim &> /dev/null; then
   echo "Vim is not installed. Skipping vim setup"
   sudo apt install vim -y
 fi
+
+# fix wsl keyring for ssh key
+if [[ $(grep -i Microsoft /proc/version) ]]; then
+  if ! command -v keyring &> /dev/null; then
+    echo "keyring is not installed. Installing keyring"
+    sudo apt install keyring -y
+  fi
+
+  # test if id_rsa is present
+  if [ ! -f "$HOME/.ssh/id_rsa" ]; then
+    echo "id_rsa not found, add to install keyring for automatic load"
+    patchBashrc "/usr/bin/keychain -q --nogui $HOME/.ssh/id_rsa"
+    patchBashrc "source $HOME/.keychain/$HOSTNAME-sh"
+  fi
+fi
+
+mkdir -p $HOME/.ssh
+if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
+  echo "authorized_keys not found, creating one"
+  touch $HOME/.ssh/authorized_keys
+fi
+patchFile "$HOME/.ssh/authorized_keys" "ssh-rsa AAAAB3NzaC1yc2EAAAABJQAAAQB7aUxv+eWA7AROzbOInaLLKxecKsj8i/TadsLhK/1FgPOGqrnYGWzi2SOnJSamH7VaegRMRN2qKT++3niWDv1vWttPMGFA+KnhCtR5ZuLs3vYnHkGukD4nn+h0TfKz6W3zX+E0rVH+7PwxEV9jq8oeCGYeNce0105uNo6g5Hn0xlrHJDomcfx3/3BeRXC1kDoTQ5WrltLsBrlA5KoVG4pkQgv/WN8jncZRRG9jZEmYLiLQ5TafjeQjjhMsrokXlqyU65UJsjHNQMDcTUR6lhGOvATkNUbXX+g5JOBfKM4U8xKsk7e/cV5tMO0VrUNmCpX4Mq/pcx3MzFMhbpv9Zkb5 vekexasia"
