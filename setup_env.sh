@@ -54,6 +54,10 @@ if ! command -v jq &> /dev/null; then
   sudo apt install jq -y
 fi
 
+if ! command -v tree &> /dev/null; then
+  echo "tree is not installed. Installing tree"
+  sudo apt install tree -y
+fi
 downloadAndInstall "jesseduffield/lazygit" "Linux_x86_64.tar.gz" "lazygit"
 downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
 downloadAndInstall "zellij-org/zellij" "x86_64-unknown-linux-musl.tar.gz" "zellij"
@@ -64,7 +68,7 @@ patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
 patchBashrc "alias ll='ls -alF'"
 
-curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
+curl -sfLo ~/.vim/autoload/plug.vim --create-dirs \
     https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
 installFromThisRepo ".vimrc"
 # check if vim is installed
@@ -94,3 +98,5 @@ if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
   touch $HOME/.ssh/authorized_keys
 fi
 patchFile "$HOME/.ssh/authorized_keys" "ssh-rsa AAAAB3NzaC1yc2EAAAABJQAAAQB7aUxv+eWA7AROzbOInaLLKxecKsj8i/TadsLhK/1FgPOGqrnYGWzi2SOnJSamH7VaegRMRN2qKT++3niWDv1vWttPMGFA+KnhCtR5ZuLs3vYnHkGukD4nn+h0TfKz6W3zX+E0rVH+7PwxEV9jq8oeCGYeNce0105uNo6g5Hn0xlrHJDomcfx3/3BeRXC1kDoTQ5WrltLsBrlA5KoVG4pkQgv/WN8jncZRRG9jZEmYLiLQ5TafjeQjjhMsrokXlqyU65UJsjHNQMDcTUR6lhGOvATkNUbXX+g5JOBfKM4U8xKsk7e/cV5tMO0VrUNmCpX4Mq/pcx3MzFMhbpv9Zkb5 vekexasia"
+patchBashrc "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
+patchBashrc "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
