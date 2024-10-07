@@ -49,15 +49,11 @@ function installFromThisRepo() {
 
 mkdir -p $HOME/.bin
 
-if ! command -v jq &> /dev/null; then
-  echo "jq is not installed. Installing jq"
-  sudo apt install jq -y
-fi
+sudo add-apt-repository ppa:neovim-ppa/unstable -y
+sudo apt update
+sudo apt install make gcc ripgrep git xclip neovim jq tree -y
 
-if ! command -v tree &> /dev/null; then
-  echo "tree is not installed. Installing tree"
-  sudo apt install tree -y
-fi
+
 downloadAndInstall "jesseduffield/lazygit" "Linux_x86_64.tar.gz" "lazygit"
 downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
 downloadAndInstall "zellij-org/zellij" "x86_64-unknown-linux-musl.tar.gz" "zellij"
