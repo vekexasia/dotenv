@@ -387,6 +387,7 @@ require("lazy").setup({
 			-- [[ Configure Telescope ]]
 			-- See `:help telescope` and `:help telescope.setup()`
 			require("telescope").setup({
+
 				-- You can put your default mappings / updates / etc. in here
 				--  All the info you're looking for is in `:help telescope.setup()`
 				--
@@ -396,6 +397,14 @@ require("lazy").setup({
 				--   }
 				-- },
 				-- pickers = {}
+				--      layout_strategy = 'vertical',
+				defaults = {
+					layout_strategy = vim.o.lines > 40 and "vertical" or "horizontal",
+					layout_config = {
+						width = 0.9,
+						height = 0.9,
+					},
+				},
 				extensions = {
 					["ui-select"] = {
 						require("telescope.themes").get_dropdown(),
@@ -627,7 +636,7 @@ require("lazy").setup({
 				--    https://github.com/pmizio/typescript-tools.nvim
 				--
 				-- But for many setups, the LSP (`ts_ls`) will work just fine
-				ts_ls = {},
+				-- ts_ls = {},
 				--
 
 				lua_ls = {
@@ -676,6 +685,34 @@ require("lazy").setup({
 			})
 		end,
 	},
+	{
+		"pmizio/typescript-tools.nvim",
+		dependencies = { "nvim-lua/plenary.nvim", "neovim/nvim-lspconfig" },
+		opts = {},
+	},
+	{
+		"dmmulroy/tsc.nvim",
+		opts = {},
+	},
+	{
+		"nvim-neotest/neotest",
+		dependencies = {
+			"nvim-neotest/nvim-nio",
+			"nvim-lua/plenary.nvim",
+			"antoinemadec/FixCursorHold.nvim",
+			"nvim-treesitter/nvim-treesitter",
+			"marilari88/neotest-vitest",
+		},
+		opts = {
+			adapters = {
+				["neotest-vitest"] = {
+					is_test_file = function(filetype)
+						return true
+					end,
+				},
+			},
+		},
+	},
 
 	{ -- Autoformat
 		"stevearc/conform.nvim",
@@ -692,7 +729,7 @@ require("lazy").setup({
 			},
 		},
 		opts = {
-			notify_on_error = false,
+			notify_on_error = true,
 			format_on_save = function(bufnr)
 				-- Disable "format_on_save lsp_fallback" for languages that don't
 				-- have a well standardized coding style. You can add additional
@@ -857,12 +894,12 @@ require("lazy").setup({
 	},
 
 	-- Highlight todo, notes, etc in comments
-	{
-		"folke/todo-comments.nvim",
-		event = "VimEnter",
-		dependencies = { "nvim-lua/plenary.nvim" },
-		opts = { signs = false },
-	},
+	--	{
+	--		"folke/todo-comments.nvim",
+	--		event = "VimEnter",
+	--		dependencies = { "nvim-lua/plenary.nvim" },
+	--		opts = { signs = false },
+	--	},
 
 	{ -- Collection of various small independent plugins/modules
 		"echasnovski/mini.nvim",
