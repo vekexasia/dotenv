@@ -63,6 +63,7 @@ patchBashrc "export PATH=\$PATH:\$HOME/.bin"
 patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
 patchBashrc "alias ll='ls -alF'"
+patchBashrc "SUDO_EDITOR=nvim"
 
 curl -sfLo ~/.vim/autoload/plug.vim --create-dirs \
     https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
@@ -96,3 +97,9 @@ fi
 patchFile "$HOME/.ssh/authorized_keys" "ssh-rsa AAAAB3NzaC1yc2EAAAABJQAAAQB7aUxv+eWA7AROzbOInaLLKxecKsj8i/TadsLhK/1FgPOGqrnYGWzi2SOnJSamH7VaegRMRN2qKT++3niWDv1vWttPMGFA+KnhCtR5ZuLs3vYnHkGukD4nn+h0TfKz6W3zX+E0rVH+7PwxEV9jq8oeCGYeNce0105uNo6g5Hn0xlrHJDomcfx3/3BeRXC1kDoTQ5WrltLsBrlA5KoVG4pkQgv/WN8jncZRRG9jZEmYLiLQ5TafjeQjjhMsrokXlqyU65UJsjHNQMDcTUR6lhGOvATkNUbXX+g5JOBfKM4U8xKsk7e/cV5tMO0VrUNmCpX4Mq/pcx3MzFMhbpv9Zkb5 vekexasia"
 patchBashrc "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
 patchBashrc "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
+
+
+mkdir -p $HOME/.config/nvim
+# download init.lua and lazy-lock.json using curl
+curl -sfLo $HOME/.config/nvim/init.lua https://github.com/vekexasia/dotenv/raw/master/nvim/init.lua
+curl -sfLo $HOME/.config/nvim/lazy-lock.json https://github.com/vekexasia/dotenv/raw/master/nvim/lazy-lock.json
