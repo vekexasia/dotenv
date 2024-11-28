@@ -168,6 +168,35 @@ vim.keymap.set('n', '<leader>ek', vim.diagnostic.goto_prev)
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- neotest
+vim.keymap.set('n', '<leader>t', '', { desc = '+test' })
+vim.keymap.set('n', '<leader>tt', function()
+  require('neotest').run.run(vim.fn.expand '%')
+end, { desc = 'Run File (Neotest)' })
+vim.keymap.set('n', '<leader>tT', function()
+  require('neotest').run.run(vim.uv.cwd())
+end, { desc = 'Run All Test Files (Neotest)' })
+vim.keymap.set('n', '<leader>tr', function()
+  require('neotest').run.run()
+end, { desc = 'Run Nearest (Neotest)' })
+vim.keymap.set('n', '<leader>tl', function()
+  require('neotest').run.run_last()
+end, { desc = 'Run Last (Neotest)' })
+vim.keymap.set('n', '<leader>ts', function()
+  require('neotest').summary.toggle()
+end, { desc = 'Toggle Summary (Neotest)' })
+vim.keymap.set('n', '<leader>to', function()
+  require('neotest').output.open { enter = true, auto_close = true }
+end, { desc = 'Show Output (Neotest)' })
+vim.keymap.set('n', '<leader>tO', function()
+  require('neotest').output_panel.toggle()
+end, { desc = 'Toggle Output Panel (Neotest)' })
+vim.keymap.set('n', '<leader>tS', function()
+  require('neotest').run.stop()
+end, { desc = 'Stop (Neotest)' })
+vim.keymap.set('n', '<leader>tw', function()
+  require('neotest').watch.toggle(vim.fn.expand '%')
+end, { desc = 'Toggle Watch (Neotest)' })
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
@@ -426,7 +455,13 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
       vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
       vim.keymap.set('n', '<leader>fb', ':Telescope file_browser path=%:p:h select_buffer=true<CR>')
-      vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
+      vim.keymap.set('n', '<leader><leader>', function()
+        builtin.buffers {
+          show_all_buffers = true,
+          sort_lastused = true,
+          ignore_current_buffer = true,
+        }
+      end, { desc = '[ ] Find existing buffers' })
 
       -- Slightly advanced example of overriding default behavior and theme
       vim.keymap.set('n', '<leader>/', function()
@@ -698,15 +733,17 @@ require('lazy').setup({
       'nvim-treesitter/nvim-treesitter',
       'marilari88/neotest-vitest',
     },
-    opts = {
-      adapters = {
-        ['neotest-vitest'] = {
-          is_test_file = function(filetype)
-            return true
-          end,
+    config = function()
+      require('neotest').setup {
+        adapters = {
+          require 'neotest-vitest' {
+            is_test_file = function()
+              return true
+            end,
+          },
         },
-      },
-    },
+      }
+    end,
   },
 
   { -- Autoformat
@@ -963,7 +1000,7 @@ require('lazy').setup({
         --  the list of additional_vim_regex_highlighting and disabled languages for indent.
         additional_vim_regex_highlighting = { 'ruby' },
       },
-      indent = { enable = false },
+      indent = { enable = true, disable = { 'ruby' } },
     },
     -- There are additional nvim-treesitter modules that you can use to interact
     -- with nvim-treesitter. You should go explore a few and see what interests you:
