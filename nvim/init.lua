@@ -262,6 +262,16 @@ require('lazy').setup({
   'tpope/vim-sleuth', -- Detect tabstop and shiftwidth automatically
 
   { 'zbirenbaum/copilot.lua', opts = { suggestion = { enabled = false }, panel = { enabled = false } } }, -- copilot
+  {
+    'jinh0/eyeliner.nvim',
+    config = function()
+      require('eyeliner').setup {
+        highlight_on_key = true,
+        dim = true,
+      }
+    end,
+  },
+
   { 'zbirenbaum/copilot-cmp', opts = {} }, -- cmp
 
   {
