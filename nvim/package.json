@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@vue/eslint-config-prettier": "^10.1.0",
+    "@vue/eslint-config-typescript": "^14.1.4"
+  }
+}
