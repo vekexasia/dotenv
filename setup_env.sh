@@ -48,9 +48,22 @@ function installFromThisRepo() {
 }
 
 mkdir -p $HOME/.bin
+#!/bin/bash
 
-sudo add-apt-repository ppa:neovim-ppa/unstable -y
-sudo apt update
+# Define the PPA to check/add
+PPA="neovim-ppa/unstable"
+
+# Check if the PPA is already added
+if add-apt-repository --list | grep -q "^deb .*$PPA"; then
+    echo "The PPA '$PPA' is already installed."
+else
+    echo "The PPA '$PPA' is not installed. Adding it now..."
+    sudo add-apt-repository -y "ppa:$PPA"
+    echo "Updating package list..."
+    sudo apt update
+    echo "The PPA '$PPA' has been added and the package list updated."
+fi
+
 sudo apt install make gcc ripgrep git xclip neovim jq tree -y
 
 
@@ -94,6 +107,7 @@ if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
   echo "authorized_keys not found, creating one"
   touch $HOME/.ssh/authorized_keys
 fi
+
 patchFile "$HOME/.ssh/authorized_keys" "ssh-rsa AAAAB3NzaC1yc2EAAAABJQAAAQB7aUxv+eWA7AROzbOInaLLKxecKsj8i/TadsLhK/1FgPOGqrnYGWzi2SOnJSamH7VaegRMRN2qKT++3niWDv1vWttPMGFA+KnhCtR5ZuLs3vYnHkGukD4nn+h0TfKz6W3zX+E0rVH+7PwxEV9jq8oeCGYeNce0105uNo6g5Hn0xlrHJDomcfx3/3BeRXC1kDoTQ5WrltLsBrlA5KoVG4pkQgv/WN8jncZRRG9jZEmYLiLQ5TafjeQjjhMsrokXlqyU65UJsjHNQMDcTUR6lhGOvATkNUbXX+g5JOBfKM4U8xKsk7e/cV5tMO0VrUNmCpX4Mq/pcx3MzFMhbpv9Zkb5 vekexasia"
 patchBashrc "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
 patchBashrc "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
