@@ -457,7 +457,7 @@ require("lazy").setup({
 				-- pickers = {}
 				--      layout_strategy = 'vertical',
 				defaults = {
-					layout_strategy = vim.o.lines > 40 and "vertical" or "horizontal",
+					layout_strategy = vim.o.lines > 45 and "vertical" or "horizontal",
 					layout_config = {
 						width = 0.9,
 						height = 0.9,
