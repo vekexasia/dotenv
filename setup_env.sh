@@ -52,7 +52,7 @@ mkdir -p $HOME/.bin
 
 # Define the PPA to check/add
 PPA="neovim-ppa/unstable"
-sudo apt install add-apt-repository -y
+sudo apt install software-properties-common -y
 # Check if the PPA is already added
 if add-apt-repository --list | grep -q "^deb .*$PPA"; then
     echo "The PPA '$PPA' is already installed."
