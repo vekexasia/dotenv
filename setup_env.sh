@@ -120,4 +120,4 @@ curl -sfLo $HOME/.config/nvim/lazy-lock.json https://github.com/vekexasia/dotenv
 curl -sfLo $HOME/.config/nvim/package.json https://github.com/vekexasia/dotenv/raw/master/nvim/package.json
 curl -sfLo $HOME/.config/nvim/package-lock.json https://github.com/vekexasia/dotenv/raw/master/nvim/package.json
 cd $HOME/.config/nvim
-npm i --frozen-lockfile
+npm ci
