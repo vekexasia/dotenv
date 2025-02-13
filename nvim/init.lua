@@ -402,7 +402,7 @@ require('lazy').setup({
   { -- Fuzzy Finder (files, lsp, etc)
     'nvim-telescope/telescope.nvim',
     event = 'VimEnter',
-    branch = '0.1.x',
+    tag = '0.1.8',
     dependencies = {
       'nvim-lua/plenary.nvim',
       { -- If encountering errors, see telescope-fzf-native README for installation instructions
@@ -462,6 +462,17 @@ require('lazy').setup({
           layout_config = {
             width = 0.9,
             height = 0.9,
+          },
+          file_ignore_patterns = { 'node_modules', '.git', 'dist/' },
+          vimgrep_arguments = {
+            'rg',
+            '--color=never',
+            '--no-heading',
+            '--with-filename',
+            '--line-number',
+            '--column',
+            '--smart-case',
+            '-u',
           },
         },
         extensions = {
@@ -761,7 +772,7 @@ require('lazy').setup({
       'nvim-lua/plenary.nvim',
       'antoinemadec/FixCursorHold.nvim',
       'nvim-treesitter/nvim-treesitter',
-      'marilari88/neotest-vitest',
+      'benelan/neotest-vitest',
     },
     config = function()
       require('neotest').setup {
@@ -808,6 +819,19 @@ require('lazy').setup({
           lsp_format = lsp_format_opt,
         }
       end,
+      formatters = {
+        eslint_d_default = {
+          command = 'eslint_d',
+          args = function()
+            local packageRoot = vim.fs.root(0, 'eslint.config.mjs')
+            local config = packageRoot and packageRoot .. '/eslint.config.mjs' or vim.fn.stdpath 'config' .. '/eslint.config.mjs'
+            return { '-c', config, '--fix-to-stdout', '--stdin', '--stdin-filename', '$FILENAME' }
+          end,
+          cwd = function(_, ctx)
+            return vim.fs.root(ctx.dirname, { 'package.json' })
+          end,
+        },
+      },
       formatters_by_ft = {
         lua = { 'stylua' },
         -- Conform can also run multiple formatters sequentially
@@ -815,8 +839,8 @@ require('lazy').setup({
         --
         -- You can use 'stop_after_first' to run the first available formatter from the list
         -- javascript = { "prettierd", "prettier", stop_after_first = true },
-        javascript = { 'eslint_d' },
-        typescript = { 'eslint_d' },
+        javascript = { 'eslint_d_default' },
+        typescript = { 'eslint_d_default' },
       },
     },
   },
@@ -1020,6 +1044,7 @@ require('lazy').setup({
         'vim',
         'vimdoc',
         'typescript',
+        'javascript',
       },
       -- Autoinstall languages that are not installed
       auto_install = true,
