@@ -343,20 +343,42 @@ require('lazy').setup({
   {
     'folke/snacks.nvim',
     ---@type snacks.Config
-    opts = {},
+    opts = {
+      layout = {
+        cycle = true,
+        --- Use the default layout or vertical if the window is too narrow
+        preset = function()
+          return vim.o.columns >= 120 and 'default' or 'vertical'
+        end,
+      },
+      ---@class snacks.picker.matcher.Config
+      matcher = {
+        fuzzy = true, -- use fuzzy matching
+        smartcase = true, -- use smartcase
+        ignorecase = true, -- use ignorecase
+        sort_empty = false, -- sort results when the search string is empty
+        filename_bonus = true, -- give bonus for matching file names (last part of the path)
+        file_pos = true, -- support patterns like `file:line:col` and `file:line`
+        -- the bonusses below, possibly require string concatenation and path normalization,
+        -- so this can have a performance impact for large lists and increase memory usage
+        cwd_bonus = false, -- give bonus for matching files in the cwd
+        frecency = false, -- frecency bonus
+        history_bonus = false, -- give more weight to chronological order
+      },
+    },
     keys = {
       -- Top Pickers & Explorer
       {
-        '<leader><space>',
+        '<leader>,',
         function()
           Snacks.picker.smart()
         end,
         desc = 'Smart Find Files',
       },
       {
-        '<leader>,',
+        '<leader><space>',
         function()
-          Snacks.picker.buffers()
+          Snacks.picker.buffers { current = false }
         end,
         desc = 'Buffers',
       },
@@ -384,18 +406,11 @@ require('lazy').setup({
       {
         '<leader>e',
         function()
-          Snacks.explorer()
+          Snacks.explorer { auto_close = true, layout = { preset = 'vertical' } }
         end,
         desc = 'File Explorer',
       },
       -- find
-      {
-        '<leader>fb',
-        function()
-          Snacks.picker.buffers()
-        end,
-        desc = 'Buffers',
-      },
       {
         '<leader>fc',
         function()
@@ -990,12 +1005,12 @@ require('lazy').setup({
           args = function()
             local packageRoot = vim.fs.root(0, 'eslint.config.mjs')
             local config = packageRoot and packageRoot .. '/eslint.config.mjs' or vim.fn.stdpath 'config' .. '/eslint.config.mjs'
-            -- print(config)
+            --print(config)
             return { '-c', config, '--fix-to-stdout', '--stdin', '--stdin-filename', '$FILENAME' }
           end,
           cwd = function(_, ctx)
             local root = vim.fs.root(ctx.dirname, { 'package.json' })
-            -- print(root)
+            --print(root)
             return root
           end,
         },
