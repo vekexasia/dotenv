@@ -937,6 +937,25 @@ require('lazy').setup({
     end,
   },
   {
+    'kevinhwang91/nvim-ufo',
+    dependencies = {
+      'kevinhwang91/promise-async',
+      'pmizio/typescript-tools.nvim',
+    },
+    config = function()
+      vim.o.foldcolumn = '0'
+      vim.o.foldlevel = 99
+      vim.o.foldlevelstart = 99
+      vim.o.foldenable = true
+
+      require('ufo').setup {
+        provider_selector = function(bufnr, filetype, buftype)
+          return { 'lsp', 'indent' }
+        end,
+      }
+    end,
+  },
+  {
     'pmizio/typescript-tools.nvim',
     dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
     opts = {},
