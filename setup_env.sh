@@ -86,6 +86,7 @@ checkAndInstall xclip
 checkAndInstall jq
 checkAndInstall tree
 checkAndInstall htop
+checkAndInstall fd-find
 
 
 
