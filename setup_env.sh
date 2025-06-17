@@ -4,18 +4,25 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-checkAndInstall() {
-    # First arg is always the command to check
+checkExists () {
+  # First arg is always the command to check
     local cmd="$1"
-    # Second arg is optional - use first arg if not provided
-    local pkg="${2:-$1}"
     
     # Check if the fucking command exists
     if command -v "$cmd" >/dev/null 2>&1; then
         echo -e "${GREEN}✓ Command '$cmd' is already installed${NC}"
         return 0
     fi
-    
+    return 1
+}
+
+checkAndInstall() {
+    local cmd="$1"
+    local pkg="${2:-$1}"
+    if checkExists "$@"; then
+      return 0
+    fi
+
     # Command doesn't exist - let's fucking install it
     echo -e "${RED}✗ Command '$cmd' not found, installing package '$pkg'...${NC}"
     
@@ -86,8 +93,15 @@ checkAndInstall xclip
 checkAndInstall jq
 checkAndInstall tree
 checkAndInstall htop
-checkAndInstall fd-find
+checkAndInstall fdfind fd-find
 
+if ! checkExists go; then
+  GOVERSION="1.24.4"
+  sudo rm -rf /usr/local/go
+  wget https://go.dev/dl/go$(echo GOVERSION).linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go$(echo GOVERSION).linux-amd64.tar.gz
+  rm go$(echo GOVERSION).linux-amd64.tar.gz*
+fi
 
 
 downloadFromGH "neovim/neovim" "nvim-linux-x86_64.tar.gz"
@@ -101,6 +115,7 @@ downloadAndInstall "zellij-org/zellij" "x86_64-unknown-linux-musl.tar.gz" "zelli
 downloadAndInstall "sharkdp/bat" "x86_64-unknown-linux-gnu.tar.gz" "bat"
 
 patchBashrc "export PATH=\$PATH:\$HOME/.bin"
+patchBashrc "export PATH=\$PATH:/usr/local/go/bin"
 patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
 patchBashrc "alias ll='ls -alF'"
