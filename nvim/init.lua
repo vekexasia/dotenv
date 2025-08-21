@@ -87,7 +87,7 @@ vim.opt.cursorline = true
 vim.opt.scrolloff = 10
 
 vim.o.expandtab = false -- Keep tabs, don't convert to spaces
-vim.o.tabstop = 2 -- Tabs are 2 spaces wide visually
+vim.o.tabstop = 2       -- Tabs are 2 spaces wide visually
 
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
@@ -195,17 +195,32 @@ local isVertical = vim.o.lines > 45
 -- NOTE: Here is where you install your plugins.
 require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
-  'tpope/vim-sleuth', -- Detect tabstop and shiftwidth automatically
+  'tpope/vim-sleuth',                                                                                     -- Detect tabstop and shiftwidth automatically
 
   { 'zbirenbaum/copilot.lua', opts = { suggestion = { enabled = false }, panel = { enabled = false } } }, -- copilot
   {
-    'jinh0/eyeliner.nvim',
-    config = function()
-      require('eyeliner').setup {
-        highlight_on_key = true,
-        dim = true,
-      }
-    end,
+    'folke/flash.nvim',
+    event = 'VeryLazy',
+    ---@type Flash.Config
+    opts = {
+      modes = {
+        search = {
+          enabled = true, -- Enable search mode
+        },
+        char = {
+          enabled = false,
+          jump_labels = true,
+          multi_line = false,
+        },
+      },
+    },
+    -- stylua: ignore
+    keys = {
+      { "s<Space>", mode = { "n", "x", "o" }, function() require("flash").jump() end,              desc = "Flash" },
+      { "S",        mode = { "n", "x", "o" }, function() require("flash").treesitter() end,        desc = "Flash Treesitter" },
+      { "R",        mode = { "o", "x" },      function() require("flash").treesitter_search() end, desc = "Treesitter Search" },
+      { "<c-s>",    mode = { "c" },           function() require("flash").toggle() end,            desc = "Toggle Flash Search" },
+    },
   },
 
   { 'zbirenbaum/copilot-cmp', opts = {} }, -- cmp
@@ -275,7 +290,7 @@ require('lazy').setup({
   -- after the plugin has been loaded:
   --  config = function() ... end
 
-  { -- Useful plugin to show you pending keybinds.
+  {                     -- Useful plugin to show you pending keybinds.
     'folke/which-key.nvim',
     event = 'VimEnter', -- Sets the loading event to 'VimEnter'
     opts = {
@@ -318,7 +333,7 @@ require('lazy').setup({
 
       -- Document existing key chains
       spec = {
-        { '<leader>c', group = '[C]ode', mode = { 'n', 'x' } },
+        { '<leader>c', group = '[C]ode',     mode = { 'n', 'x' } },
         { '<leader>d', group = '[D]ocument' },
         { '<leader>r', group = '[R]ename' },
         { '<leader>s', group = '[S]earch' },
@@ -344,8 +359,8 @@ require('lazy').setup({
     },
     keys = {
       { '<leader>dh', '<cmd>DiffviewFileHistory %<CR>', desc = 'DiffView [H]istory' },
-      { '<leader>dc', '<cmd>DiffviewClose<CR>', desc = 'DiffView [C]lose' },
-      { '<leader>do', '<cmd>DiffviewOpen<CR>', desc = 'DiffView [O]pen' },
+      { '<leader>dc', '<cmd>DiffviewClose<CR>',         desc = 'DiffView [C]lose' },
+      { '<leader>do', '<cmd>DiffviewOpen<CR>',          desc = 'DiffView [O]pen' },
     },
   },
   {
@@ -381,16 +396,16 @@ require('lazy').setup({
       },
       ---@class snacks.picker.matcher.Config
       matcher = {
-        fuzzy = true, -- use fuzzy matching
-        smartcase = true, -- use smartcase
-        ignorecase = true, -- use ignorecase
-        sort_empty = false, -- sort results when the search string is empty
+        fuzzy = true,          -- use fuzzy matching
+        smartcase = true,      -- use smartcase
+        ignorecase = true,     -- use ignorecase
+        sort_empty = false,    -- sort results when the search string is empty
         filename_bonus = true, -- give bonus for matching file names (last part of the path)
-        file_pos = true, -- support patterns like `file:line:col` and `file:line`
+        file_pos = true,       -- support patterns like `file:line:col` and `file:line`
         -- the bonusses below, possibly require string concatenation and path normalization,
         -- so this can have a performance impact for large lists and increase memory usage
-        cwd_bonus = false, -- give bonus for matching files in the cwd
-        frecency = false, -- frecency bonus
+        cwd_bonus = false,     -- give bonus for matching files in the cwd
+        frecency = false,      -- frecency bonus
         history_bonus = false, -- give more weight to chronological order
       },
     },
@@ -406,7 +421,7 @@ require('lazy').setup({
       {
         '<leader><space>',
         function()
-          Snacks.picker.buffers { current = false }
+          Snacks.picker.buffers { current = false, sort_lastused = true }
         end,
         desc = 'Buffers',
       },
@@ -788,7 +803,7 @@ require('lazy').setup({
 
       -- Useful status updates for LSP.
       -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
-      { 'j-hui/fidget.nvim', opts = {} },
+      { 'j-hui/fidget.nvim',       opts = {} },
 
       -- Allows extra capabilities provided by nvim-cmp
       'hrsh7th/cmp-nvim-lsp',
@@ -947,6 +962,10 @@ require('lazy').setup({
       local ensure_installed = vim.tbl_keys(servers or {})
       vim.list_extend(ensure_installed, {
         'stylua', -- Used to format Lua code
+        'eslint_d',
+        'lua-language-server',
+        'eslint-lsp'
+
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
@@ -987,10 +1006,10 @@ require('lazy').setup({
     'pmizio/typescript-tools.nvim',
     dependencies = { 'nvim-lua/plenary.nvim', 'neovim/nvim-lspconfig' },
     keys = {
-      { '<leader>tm', '<cmd>TSToolsAddMissingImports<CR>', desc = 'TS Add missing imports' },
-      { '<leader>to', '<cmd>TSToolsOrganizeImports<CR>', desc = 'TS Organize Imports' },
+      { '<leader>tm',  '<cmd>TSToolsAddMissingImports<CR>',    desc = 'TS Add missing imports' },
+      { '<leader>to',  '<cmd>TSToolsOrganizeImports<CR>',      desc = 'TS Organize Imports' },
       { '<leader>tgd', '<cmd>TSToolsGoToSourceDefinition<CR>', desc = 'TS Go To Source Definition' },
-      { '<leader>tfr', '<cmd>TSToolsFileReferences<CR>', desc = 'TS Find File References' },
+      { '<leader>tfr', '<cmd>TSToolsFileReferences<CR>',       desc = 'TS Find File References' },
     },
     opts = {},
   },
@@ -1057,8 +1076,10 @@ require('lazy').setup({
           command = 'eslint_d',
           args = function()
             local packageRoot = vim.fs.root(0, 'eslint.config.mjs')
-            local config = packageRoot and packageRoot .. '/eslint.config.mjs' or vim.fn.stdpath 'config' .. '/eslint.config.mjs'
+            local config = packageRoot and packageRoot .. '/eslint.config.mjs' or
+                vim.fn.stdpath 'config' .. '/eslint.config.mjs'
             --print(config)
+            -- print(vim.inspect { '-c', config, '--fix-to-stdout', '--stdin', '--stdin-filename', '$FILENAME' })
             return { '-c', config, '--fix-to-stdout', '--stdin', '--stdin-filename', '$FILENAME' }
           end,
           cwd = function(_, ctx)
