@@ -147,6 +147,17 @@ patchBashrc "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --pr
 patchBashrc "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
 patchBashrc 'export PATH="$PATH:/opt/nvim-linux-x86_64/bin"'
 
+# WSL Screenshot Monitor Setup
+if [[ $(grep -i Microsoft /proc/version) ]]; then
+  echo "WSL detected, setting up screenshot monitor..."
+  mkdir -p $HOME/.bin/screenshot-monitor
+  curl -sfLo $HOME/.bin/screenshot-monitor/screenshot-functions.sh https://github.com/vekexasia/windows-to-wsl2-screenshots/raw/master/screenshot-functions.sh
+  curl -sfLo $HOME/.bin/screenshot-monitor/auto-clipboard-monitor.ps1 https://github.com/vekexasia/windows-to-wsl2-screenshots/raw/master/auto-clipboard-monitor.ps1
+
+  patchBashrc "source \$HOME/.bin/screenshot-monitor/screenshot-functions.sh"
+  patchBashrc 'pgrep -f "auto-clipboard-monitor" > /dev/null 2>&1 || start-screenshot-monitor # auto-start screenshot monitor'
+fi
+
 mkdir -p $HOME/.config/nvim
 # download init.lua and lazy-lock.json using curl
 curl -sfLo $HOME/.config/nvim/init.lua https://github.com/vekexasia/dotenv/raw/master/nvim/init.lua
