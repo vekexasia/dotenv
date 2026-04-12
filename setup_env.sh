@@ -4,6 +4,11 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
+IS_WSL=0
+if grep -qi Microsoft /proc/version 2>/dev/null; then
+  IS_WSL=1
+fi
+
 checkExists () {
   # First arg is always the command to check
     local cmd="$1"
@@ -84,6 +89,9 @@ function installFromThisRepo() {
 }
 
 mkdir -p $HOME/.bin
+if [ "$IS_WSL" -eq 1 ]; then
+  mkdir -p $HOME/.local/bin
+fi
 
 checkAndInstall make
 checkAndInstall gcc
@@ -94,6 +102,11 @@ checkAndInstall jq
 checkAndInstall tree
 checkAndInstall htop
 checkAndInstall fdfind fd-find
+
+if [ "$IS_WSL" -eq 1 ]; then
+  checkAndInstall wl-copy wl-clipboard
+  checkAndInstall convert imagemagick
+fi
 
 if ! checkExists go; then
   GOVERSION="1.24.4"
@@ -115,6 +128,9 @@ downloadAndInstall "zellij-org/zellij" "x86_64-unknown-linux-musl.tar.gz" "zelli
 downloadAndInstall "sharkdp/bat" "x86_64-unknown-linux-gnu.tar.gz" "bat"
 
 patchBashrc "export PATH=\$PATH:\$HOME/.bin"
+if [ "$IS_WSL" -eq 1 ]; then
+  patchBashrc 'export PATH="$HOME/.local/bin:$PATH"'
+fi
 patchBashrc "export PATH=\$PATH:/usr/local/go/bin"
 patchBashrc 'eval "$(fzf --bash)"'
 patchBashrc "export BAT_THEME=\"TwoDark\""
@@ -122,7 +138,7 @@ patchBashrc "alias ll='ls -alF'"
 patchBashrc "export SUDO_EDITOR=\"nvim\""
 
 # fix wsl keyring for ssh key
-if [[ $(grep -i Microsoft /proc/version) ]]; then
+if [ "$IS_WSL" -eq 1 ]; then
   if ! command -v keyring &> /dev/null; then
     echo "keyring is not installed. Installing keyring"
     sudo apt install keyring -y
@@ -147,22 +163,35 @@ patchBashrc "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --pr
 patchBashrc "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
 patchBashrc 'export PATH="$PATH:/opt/nvim-linux-x86_64/bin"'
 
-# WSL Screenshot Monitor Setup
-if [[ $(grep -i Microsoft /proc/version) ]]; then
-  echo "WSL detected, setting up screenshot monitor..."
-  mkdir -p $HOME/.bin/screenshot-monitor
-  curl -sfLo $HOME/.bin/screenshot-monitor/screenshot-functions.sh https://github.com/vekexasia/windows-to-wsl2-screenshots/raw/master/screenshot-functions.sh
-  curl -sfLo $HOME/.bin/screenshot-monitor/auto-clipboard-monitor.ps1 https://github.com/vekexasia/windows-to-wsl2-screenshots/raw/master/auto-clipboard-monitor.ps1
-
-  patchBashrc "source \$HOME/.bin/screenshot-monitor/screenshot-functions.sh"
-  patchBashrc 'pgrep -f "auto-clipboard-monitor" > /dev/null 2>&1 || start-screenshot-monitor # auto-start screenshot monitor'
+TMP_DOTENV_DIR=$(mktemp -d)
+if ! git clone --depth 1 https://github.com/vekexasia/dotenv.git "$TMP_DOTENV_DIR/dotenv"; then
+  echo -e "${RED}✗ Failed to clone dotenv repo${NC}"
+  rm -rf "$TMP_DOTENV_DIR"
+  exit 1
 fi
 
-mkdir -p $HOME/.config/nvim
-# download init.lua and lazy-lock.json using curl
-curl -sfLo $HOME/.config/nvim/init.lua https://github.com/vekexasia/dotenv/raw/master/nvim/init.lua
-curl -sfLo $HOME/.config/nvim/lazy-lock.json https://github.com/vekexasia/dotenv/raw/master/nvim/lazy-lock.json
-curl -sfLo $HOME/.config/nvim/package.json https://github.com/vekexasia/dotenv/raw/master/nvim/package.json
-curl -sfLo $HOME/.config/nvim/package-lock.json https://github.com/vekexasia/dotenv/raw/master/nvim/package.json
-cd $HOME/.config/nvim
+rm -rf "$HOME/.config/nvim"
+mkdir -p "$HOME/.config/nvim"
+cp -R "$TMP_DOTENV_DIR/dotenv/nvim/." "$HOME/.config/nvim/"
+
+if [ "$IS_WSL" -eq 1 ]; then
+  if [ -d "$TMP_DOTENV_DIR/dotenv/.local/bin" ]; then
+    mkdir -p "$HOME/.local/bin"
+    cp -R "$TMP_DOTENV_DIR/dotenv/.local/bin/." "$HOME/.local/bin/"
+    echo -e "${GREEN}✓ Installed WSL clipboard helpers to $HOME/.local/bin${NC}"
+  fi
+
+  WIN_HOME=$(powershell.exe -NoProfile -Command '$env:USERPROFILE' | tr -d '\r')
+  if [ -n "$WIN_HOME" ] && command -v wslpath >/dev/null 2>&1; then
+    WIN_HOME_WSL=$(wslpath "$WIN_HOME")
+    if [ -d "$WIN_HOME_WSL" ]; then
+      cp "$TMP_DOTENV_DIR/dotenv/.wezterm.lua" "$WIN_HOME_WSL/.wezterm.lua"
+      echo -e "${GREEN}✓ Installed WezTerm config to $WIN_HOME_WSL/.wezterm.lua${NC}"
+    fi
+  fi
+fi
+
+rm -rf "$TMP_DOTENV_DIR"
+
+cd "$HOME/.config/nvim" || exit 1
 npm ci

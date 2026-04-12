@@ -9,6 +9,8 @@ local config = wezterm.config_builder()
 -- This is where you actually apply your config choices
 
 config.default_domain = "WSL:Ubuntu"
+config.enable_kitty_keyboard = false
+config.notification_handling = "AlwaysShow"
 
 -- For example, changing the color scheme:
 
@@ -30,10 +32,6 @@ wezterm.on("gui-startup", function()
 	window:gui_window():maximize()
 end)
 
-wezterm.on("copy-latest-screenshot", function(window, pane)
-	wezterm.background_child_process({ "powershell.exe", "-Command", "Set-Clipboard -Value '~/.screenshots/latest.png'" })
-end)
-
 config.key_tables = {
 	paste_mode = {
 		{ key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
@@ -49,7 +47,8 @@ config.keys = {
 			one_shot = false,
 		}),
 	},
-	{ key = "Backspace", mods = "CTRL", action = act.SendKey({ key = "w", mods = "CTRL" }) },
+	{ key = "Backspace", mods = "CTRL", action = act.SendString("\x17") },
+	{ key = "Delete", mods = "CTRL", action = act.SendString("\x1bd") },
 	--	{ key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
 	{
 		key = "v",
@@ -70,11 +69,6 @@ config.keys = {
 		key = "RightArrow",
 		mods = "CTRL|SHIFT",
 		action = act.MoveTabRelative(1),
-	},
-	{
-		key = "s",
-		mods = "CTRL|ALT",
-		action = act.EmitEvent("copy-latest-screenshot"),
 	},
 }
 -- and finally, return the configuration to wezterm

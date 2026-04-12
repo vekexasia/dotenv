@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# wl-paste wrapper: transparently converts BMP clipboard (WSLg) to PNG
+# so tools like Claude Code can paste images without needing Photon WASM.
+# Also ensures WAYLAND_DISPLAY is set (pi wrapper unsets it to avoid X11 crashes).
+
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+
+REAL=/usr/bin/wl-paste
+LOG=/tmp/wl-paste-debug.log
+
+# ── logging ──────────────────────────────────────────────────────────────────
+echo "[$(date '+%H:%M:%S')] CALLED: wl-paste $*  (ppid=$PPID pid=$$)" >> "$LOG"
+
+# ── --list-types: inject image/png if clipboard only has bmp ─────────────────
+if [[ " $* " == *" --list-types "* ]] || [[ "$*" == "--list-types" ]] || \
+   [[ " $* " == *" -l "* ]] || [[ "$*" == "-l" ]]; then
+  TYPES=$("$REAL" --list-types 2>&1)
+  EXIT=$?
+  echo "[$(date '+%H:%M:%S')] list-types raw (exit=$EXIT): $(echo "$TYPES" | tr '\n' '|')" >> "$LOG"
+
+  if echo "$TYPES" | grep -q "image/bmp" && ! echo "$TYPES" | grep -q "image/png"; then
+    printf 'image/png\n'
+  fi
+  # Only print if TYPES is non-empty to avoid spurious blank line
+  [[ -n "$TYPES" ]] && printf '%s\n' "$TYPES"
+  exit $EXIT
+fi
+
+# ── --type image/png: if only bmp is available, convert it ───────────────────
+HAS_PNG_TYPE=0
+for arg in "$@"; do
+  [[ "$arg" == "image/png" ]] && HAS_PNG_TYPE=1
+done
+
+if [[ $HAS_PNG_TYPE -eq 1 ]]; then
+  TYPES=$("$REAL" --list-types 2>/dev/null)
+  echo "[$(date '+%H:%M:%S')] png-request types: $(echo "$TYPES" | tr '\n' '|')" >> "$LOG"
+  if echo "$TYPES" | grep -q "image/bmp" && ! echo "$TYPES" | grep -q "image/png"; then
+    # Only BMP is available — convert it to PNG via ImageMagick (binary-safe pipe)
+    set -o pipefail
+    "$REAL" --type image/bmp --no-newline 2>>"$LOG" | convert bmp:- png:- 2>>"$LOG"
+    RC=$?
+    echo "[$(date '+%H:%M:%S')] bmp->png convert exit=$RC" >> "$LOG"
+    exit $RC
+  fi
+fi
+
+# ── everything else: pass through ────────────────────────────────────────────
+echo "[$(date '+%H:%M:%S')] passthrough: wl-paste $*" >> "$LOG"
+exec "$REAL" "$@"

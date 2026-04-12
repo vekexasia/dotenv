@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# wl-copy wrapper: uses OSC 52 for text to avoid WSLg XWayland clipboard crashes.
+# For non-text types, falls through to the real wl-copy.
+# Ensures WAYLAND_DISPLAY is set (pi wrapper unsets it to avoid X11 crashes).
+
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+
+REAL=/usr/bin/wl-copy
+LOG=/tmp/wl-copy-debug.log
+
+echo "[$(date '+%H:%M:%S')] CALLED: wl-copy $*  (ppid=$PPID pid=$$)" >> "$LOG"
+
+# ── handle --clear / --version / --help: pass through ───────────────────────
+for arg in "$@"; do
+  case "$arg" in
+    -c|--clear|-v|--version|-h|--help)
+      exec "$REAL" "$@"
+      ;;
+  esac
+done
+
+# ── detect if a specific non-text mime type was requested ────────────────────
+MIME_TYPE=""
+NEXT_IS_TYPE=0
+for arg in "$@"; do
+  if [[ $NEXT_IS_TYPE -eq 1 ]]; then
+    MIME_TYPE="$arg"
+    NEXT_IS_TYPE=0
+  fi
+  case "$arg" in
+    -t|--type) NEXT_IS_TYPE=1 ;;
+    -t=*|--type=*) MIME_TYPE="${arg#*=}" ;;
+  esac
+done
+
+# If explicit non-text mime type, fall through to real wl-copy
+if [[ -n "$MIME_TYPE" ]] && [[ "$MIME_TYPE" != text/* ]]; then
+  echo "[$(date '+%H:%M:%S')] non-text type ($MIME_TYPE), passthrough" >> "$LOG"
+  exec "$REAL" "$@"
+fi
+
+# ── collect text: from args or stdin ─────────────────────────────────────────
+# Strip options to get positional text args
+TEXT_ARGS=()
+SKIP_NEXT=0
+for arg in "$@"; do
+  if [[ $SKIP_NEXT -eq 1 ]]; then
+    SKIP_NEXT=0
+    continue
+  fi
+  case "$arg" in
+    -t|--type|-s|--seat) SKIP_NEXT=1 ;;
+    -t=*|--type=*|-s=*|--seat=*) ;;
+    -o|--paste-once|-f|--foreground|-p|--primary|-n|--trim-newline) ;;
+    *) TEXT_ARGS+=("$arg") ;;
+  esac
+done
+
+if [[ ${#TEXT_ARGS[@]} -gt 0 ]]; then
+  TEXT="${TEXT_ARGS[*]}"
+else
+  # Read from stdin
+  TEXT=$(cat)
+fi
+
+# ── copy via OSC 52 (terminal handles it → Windows clipboard) ────────────────
+ENCODED=$(printf '%s' "$TEXT" | base64 -w 0)
+printf '\033]52;c;%s\a' "$ENCODED" > /dev/tty 2>/dev/null || \
+printf '\033]52;c;%s\a' "$ENCODED"
+
+echo "[$(date '+%H:%M:%S')] OSC52 sent (${#TEXT} bytes)" >> "$LOG"
