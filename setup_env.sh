@@ -174,6 +174,9 @@ rm -rf "$HOME/.config/nvim"
 mkdir -p "$HOME/.config/nvim"
 cp -R "$TMP_DOTENV_DIR/dotenv/nvim/." "$HOME/.config/nvim/"
 
+cp "$TMP_DOTENV_DIR/dotenv/.tmux.conf" "$HOME/.tmux.conf"
+echo -e "${GREEN}✓ Installed tmux config to $HOME/.tmux.conf${NC}"
+
 if [ "$IS_WSL" -eq 1 ]; then
   if [ -d "$TMP_DOTENV_DIR/dotenv/.local/bin" ]; then
     mkdir -p "$HOME/.local/bin"

@@ -32,6 +32,10 @@ wezterm.on("gui-startup", function()
 	window:gui_window():maximize()
 end)
 
+wezterm.on("copy-latest-screenshot", function(window, pane)
+	wezterm.background_child_process({ "powershell.exe", "-Command", "Set-Clipboard -Value '/tmp/latest.png'" })
+end)
+
 config.key_tables = {
 	paste_mode = {
 		{ key = "v", mods = "CTRL", action = act.PasteFrom("Clipboard") },
@@ -69,6 +73,11 @@ config.keys = {
 		key = "RightArrow",
 		mods = "CTRL|SHIFT",
 		action = act.MoveTabRelative(1),
+	},
+	{
+		key = "s",
+		mods = "CTRL|ALT",
+		action = act.EmitEvent("copy-latest-screenshot"),
 	},
 }
 -- and finally, return the configuration to wezterm
