@@ -1,0 +1,6 @@
+{
+  "overrideDefaultCompaction": true,
+  "debug": false,
+  "smartKeepTail": true,
+  "continueAfterThresholdCompact": true
+}

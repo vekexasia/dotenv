@@ -1,200 +1,111 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
+REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 IS_WSL=0
-if grep -qi Microsoft /proc/version 2>/dev/null; then
-  IS_WSL=1
-fi
+grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
 
-checkExists () {
-  # First arg is always the command to check
-    local cmd="$1"
-    
-    # Check if the fucking command exists
-    if command -v "$cmd" >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ Command '$cmd' is already installed${NC}"
-        return 0
-    fi
-    return 1
+install_package() {
+  local repository=$1 asset_pattern=$2 binary=$3
+  [ -x "$HOME/.bin/$binary" ] || command -v "$binary" >/dev/null 2>&1 && return
+  sudo apt-get install -y "$package_name"
 }
 
-checkAndInstall() {
-    local cmd="$1"
-    local pkg="${2:-$1}"
-    if checkExists "$@"; then
-      return 0
-    fi
-
-    # Command doesn't exist - let's fucking install it
-    echo -e "${RED}✗ Command '$cmd' not found, installing package '$pkg'...${NC}"
-    
-    # Install the goddamn package
-    if sudo apt-get install -y "$pkg"; then
-        echo -e "${GREEN}✓ Successfully installed package '$pkg'${NC}"
-        return 0
-    else
-        echo -e "${RED}✗ Failed to install package '$pkg'.${NC}"
-        return 1
-    fi
-}
-function patchFile() {
-  # checks if line in $2 is in $1 and if not appends it
-  if ! grep -q "$2" "$1"; then
-    echo -e "${GREEN}✓ Patched $1 with $2.${NC}"
-    echo "$2" >> "$1"
-  fi
-}
-function patchBashrc() {
-  # checks if line in $1 is in .bashrc and if not appends it
-  patchFile "$HOME/.bashrc" "$1"
+install_release() {
+  local repository=$1 asset_pattern=$2 binary=$3
+  command -v "$binary" >/dev/null 2>&1 && return
+  local workdir url
+  workdir=$(mktemp -d)
+  url=$(curl -fsSL "https://api.github.com/repos/$repository/releases/latest" | jq -r ".assets[] | select(.name | test(\"$asset_pattern\")) | .browser_download_url" | head -1)
+  [ -n "$url" ] && [ "$url" != null ]
+  curl -fsSL "$url" -o "$workdir/release.tar.gz"
+  tar -xzf "$workdir/release.tar.gz" -C "$workdir"
+  install -Dm755 "$(find "$workdir" -type f -name "$binary" -perm -u+x | head -1)" "$HOME/.bin/$binary"
+  rm -rf "$workdir"
 }
 
-function downloadFromGH () {
-
-  URL="https://api.github.com/repos/$1/releases/latest"
-
-  ASSET=`curl -s $URL | jq -r ".assets[] | select(.name | test(\"$2\")) | .browser_download_url"`
-  echo -e "${GREEN}✓ Downloading $ASSET${NC}"
-  curl -L -s -o $2 $ASSET
+append_once() {
+  local line=$1 file=${2:-"$HOME/.bashrc"}
+  touch "$file"
+  grep -Fqx -- "$line" "$file" || printf '\n%s\n' "$line" >> "$file"
 }
 
-function downloadAndInstall () {
-  if [ -f "$HOME/.bin/$3" ]; then
-    return 1
-  fi
-  downloadFromGH $1 $2
-  FOLDER=$(echo "$1" | cut -d'/' -f2)
-  echo $FOLDER
-  mkdir -p $FOLDER
-  tar -xvf $2 -C "$FOLDER"
-  rm $2
-  cd $FOLDER || (echo "${RED} x cannot enter $FOLDER${NC}" && return 1)
-  find . -type f -executable -name $3 -exec mv {} "$HOME/.bin/$3" \;
-  cd .. || (echo "${RED} x cannot exit $FOLDER${NC}" && return 1)
-  rm -rf $FOLDER
-  return 0
-}
-function installFromThisRepo() {
-  curl -L -s "https://github.com/vekexasia/dotenv/raw/master/$1" -o "$HOME/$1"
-  if [ $? != 0 ]; then
-    echo "${RED} x Failed to download $1${NC}"
-    return 1
-  fi
-  if [ "$2" == "x" ]; then
-    chmod +x "$HOME/$1"
-  fi
+sync_pi() {
+  mkdir -p "$HOME/.pi/agent"
+  rsync -a --delete \
+    --exclude=.git --exclude=auth.json --exclude=ha.json --exclude='ha.json.*' \
+    --exclude=trust.json --exclude=sessions/ --exclude=git/ --exclude=node_modules/ \
+    --exclude=npm/node_modules/ --exclude=models-store.json --exclude=.advisor-state.json \
+    --exclude=pi-goal.json --exclude=package-lock.json --exclude='*.log' --exclude='*.lock' \
+    --exclude='*.pid' --exclude='*.bak' --exclude='*.bak-*' \
+    --exclude=extensions/home-assistant/config.json \
+    "$REPO_DIR/pi/agent/" "$HOME/.pi/agent/"
 }
 
-mkdir -p $HOME/.bin
-if [ "$IS_WSL" -eq 1 ]; then
-  mkdir -p $HOME/.local/bin
-fi
-
-checkAndInstall make
-checkAndInstall gcc
-checkAndInstall rg ripgrep 
-checkAndInstall git
-checkAndInstall xclip
-checkAndInstall jq
-checkAndInstall tree
-checkAndInstall htop
-checkAndInstall fdfind fd-find
+sudo apt-get update
+for spec in \
+  'make:make' 'gcc:gcc' 'rg:ripgrep' 'git:git' 'curl:curl' 'xclip:xclip' 'jq:jq' \
+  'tree:tree' 'htop:htop' 'fdfind:fd-find' 'rsync:rsync' 'fzf:fzf' 'batcat:bat' \
+  'gh:gh' 'glab:glab' 'python3:python3' 'python3-venv:python3-venv'; do
+  install_package "${spec%%:*}" "${spec#*:}"
+done
 
 if [ "$IS_WSL" -eq 1 ]; then
-  checkAndInstall wl-copy wl-clipboard
-  checkAndInstall convert imagemagick
+  install_package wl-copy wl-clipboard
+  install_package convert imagemagick
 fi
 
-if ! checkExists go; then
-  GOVERSION="1.24.4"
+mkdir -p "$HOME/.bin"
+command -v bat >/dev/null 2>&1 || ln -sf "$(command -v batcat)" "$HOME/.bin/bat"
+install_release jesseduffield/lazygit 'Linux_x86_64\.tar\.gz' lazygit
+install_release zellij-org/zellij 'x86_64-unknown-linux-musl\.tar\.gz' zellij
+append_once 'export PATH="$HOME/.bin:$PATH"'
+append_once 'export PATH="$HOME/.local/bin:$PATH"'
+append_once 'export PATH="$PATH:/usr/local/go/bin"'
+append_once 'export PATH="$PATH:/opt/nvim-linux-x86_64/bin"'
+append_once 'eval "$(fzf --bash)"'
+append_once 'export BAT_THEME="TwoDark"'
+append_once "alias ll='ls -alF'"
+append_once 'export SUDO_EDITOR="nvim"'
+append_once "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
+append_once "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
+
+if ! command -v go >/dev/null 2>&1; then
+  go_version=1.24.4
+  archive=$(mktemp)
+  curl -fsSL "https://go.dev/dl/go${go_version}.linux-amd64.tar.gz" -o "$archive"
   sudo rm -rf /usr/local/go
-  wget https://go.dev/dl/go$(echo GOVERSION).linux-amd64.tar.gz
-  sudo tar -C /usr/local -xzf go$(echo GOVERSION).linux-amd64.tar.gz
-  rm go$(echo GOVERSION).linux-amd64.tar.gz*
+  sudo tar -C /usr/local -xzf "$archive"
+  rm -f "$archive"
 fi
 
-
-downloadFromGH "neovim/neovim" "nvim-linux-x86_64.tar.gz"
-sudo rm -rf /opt/nvim-linux-x86_64
-sudo tar -C /opt -xzf nvim-linux-x86_64.tar.gz
-rm ./nvim-linux-x86_64.tar.gz
-
-downloadAndInstall "jesseduffield/lazygit" "Linux_x86_64.tar.gz" "lazygit"
-downloadAndInstall "junegunn/fzf" "linux_amd64.tar.gz" "fzf"
-downloadAndInstall "zellij-org/zellij" "x86_64-unknown-linux-musl.tar.gz" "zellij"
-downloadAndInstall "sharkdp/bat" "x86_64-unknown-linux-gnu.tar.gz" "bat"
-
-patchBashrc "export PATH=\$PATH:\$HOME/.bin"
-if [ "$IS_WSL" -eq 1 ]; then
-  patchBashrc 'export PATH="$HOME/.local/bin:$PATH"'
-fi
-patchBashrc "export PATH=\$PATH:/usr/local/go/bin"
-patchBashrc 'eval "$(fzf --bash)"'
-patchBashrc "export BAT_THEME=\"TwoDark\""
-patchBashrc "alias ll='ls -alF'"
-patchBashrc "export SUDO_EDITOR=\"nvim\""
-
-# fix wsl keyring for ssh key
-if [ "$IS_WSL" -eq 1 ]; then
-  if ! command -v keyring &> /dev/null; then
-    echo "keyring is not installed. Installing keyring"
-    sudo apt install keyring -y
-  fi
-
-  # test if id_rsa is present
-  if [ ! -f "$HOME/.ssh/id_rsa" ]; then
-    echo "id_rsa not found, add to install keyring for automatic load"
-    patchBashrc "/usr/bin/keychain -q --nogui $HOME/.ssh/id_rsa"
-    patchBashrc "source $HOME/.keychain/$HOSTNAME-sh"
-  fi
+if [ ! -x /opt/nvim-linux-x86_64/bin/nvim ]; then
+  archive=$(mktemp)
+  curl -fsSL https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz -o "$archive"
+  sudo rm -rf /opt/nvim-linux-x86_64
+  sudo mkdir -p /opt/nvim-linux-x86_64
+  sudo tar -C /opt -xzf "$archive"
+  rm -f "$archive"
 fi
 
-mkdir -p $HOME/.ssh
-if [ ! -f "$HOME/.ssh/authorized_keys" ]; then
-  echo "authorized_keys not found, creating one"
-  touch $HOME/.ssh/authorized_keys
-fi
-
-patchFile "$HOME/.ssh/authorized_keys" "ssh-rsa AAAAB3NzaC1yc2EAAAABJQAAAQB7aUxv+eWA7AROzbOInaLLKxecKsj8i/TadsLhK/1FgPOGqrnYGWzi2SOnJSamH7VaegRMRN2qKT++3niWDv1vWttPMGFA+KnhCtR5ZuLs3vYnHkGukD4nn+h0TfKz6W3zX+E0rVH+7PwxEV9jq8oeCGYeNce0105uNo6g5Hn0xlrHJDomcfx3/3BeRXC1kDoTQ5WrltLsBrlA5KoVG4pkQgv/WN8jncZRRG9jZEmYLiLQ5TafjeQjjhMsrokXlqyU65UJsjHNQMDcTUR6lhGOvATkNUbXX+g5JOBfKM4U8xKsk7e/cV5tMO0VrUNmCpX4Mq/pcx3MzFMhbpv9Zkb5 vekexasia"
-patchBashrc "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
-patchBashrc "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
-patchBashrc 'export PATH="$PATH:/opt/nvim-linux-x86_64/bin"'
-
-TMP_DOTENV_DIR=$(mktemp -d)
-if ! git clone --depth 1 https://github.com/vekexasia/dotenv.git "$TMP_DOTENV_DIR/dotenv"; then
-  echo -e "${RED}✗ Failed to clone dotenv repo${NC}"
-  rm -rf "$TMP_DOTENV_DIR"
-  exit 1
-fi
-
-rm -rf "$HOME/.config/nvim"
-mkdir -p "$HOME/.config/nvim"
-cp -R "$TMP_DOTENV_DIR/dotenv/nvim/." "$HOME/.config/nvim/"
-
-cp "$TMP_DOTENV_DIR/dotenv/.tmux.conf" "$HOME/.tmux.conf"
-echo -e "${GREEN}✓ Installed tmux config to $HOME/.tmux.conf${NC}"
+rsync -a --delete --exclude=node_modules/ "$REPO_DIR/nvim/" "$HOME/.config/nvim/"
+install -Dm644 "$REPO_DIR/.tmux.conf" "$HOME/.tmux.conf"
 
 if [ "$IS_WSL" -eq 1 ]; then
-  if [ -d "$TMP_DOTENV_DIR/dotenv/.local/bin" ]; then
-    mkdir -p "$HOME/.local/bin"
-    cp -R "$TMP_DOTENV_DIR/dotenv/.local/bin/." "$HOME/.local/bin/"
-    echo -e "${GREEN}✓ Installed WSL clipboard helpers to $HOME/.local/bin${NC}"
-  fi
-
-  WIN_HOME=$(powershell.exe -NoProfile -Command '$env:USERPROFILE' | tr -d '\r')
-  if [ -n "$WIN_HOME" ] && command -v wslpath >/dev/null 2>&1; then
-    WIN_HOME_WSL=$(wslpath "$WIN_HOME")
-    if [ -d "$WIN_HOME_WSL" ]; then
-      cp "$TMP_DOTENV_DIR/dotenv/.wezterm.lua" "$WIN_HOME_WSL/.wezterm.lua"
-      echo -e "${GREEN}✓ Installed WezTerm config to $WIN_HOME_WSL/.wezterm.lua${NC}"
-    fi
+  mkdir -p "$HOME/.local/bin"
+  rsync -a --delete "$REPO_DIR/.local/bin/" "$HOME/.local/bin/"
+  if command -v powershell.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+    windows_home=$(powershell.exe -NoProfile -Command '$env:USERPROFILE' | tr -d '\r')
+    [ -n "$windows_home" ] && install -Dm644 "$REPO_DIR/.wezterm.lua" "$(wslpath "$windows_home")/.wezterm.lua"
   fi
 fi
 
-rm -rf "$TMP_DOTENV_DIR"
+venv="$HOME/.local/share/nvim/gigatoken-venv"
+if [ ! -x "$venv/bin/python" ]; then
+  python3 -m venv "$venv"
+  "$venv/bin/pip" install gigatoken
+fi
 
-cd "$HOME/.config/nvim" || exit 1
-npm ci
+sync_pi
+command -v pi >/dev/null 2>&1 && pi update --extensions
+(cd "$HOME/.config/nvim" && npm ci)

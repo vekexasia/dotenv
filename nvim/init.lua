@@ -988,10 +988,7 @@ require("lazy").setup({
 	},
 	{
 		"kevinhwang91/nvim-ufo",
-		dependencies = {
-			"kevinhwang91/promise-async",
-			"pmizio/typescript-tools.nvim",
-		},
+		dependencies = { "kevinhwang91/promise-async" },
 		config = function()
 			vim.o.foldcolumn = "0"
 			vim.o.foldlevel = 99
@@ -1006,15 +1003,15 @@ require("lazy").setup({
 		end,
 	},
 	{
-		"pmizio/typescript-tools.nvim",
-		dependencies = { "nvim-lua/plenary.nvim", "neovim/nvim-lspconfig" },
+		"faruzzy/tsgo.nvim",
+		ft = { "javascript", "javascriptreact", "javascript.jsx", "typescript", "typescriptreact", "typescript.tsx" },
 		keys = {
-			{ "<leader>tm", "<cmd>TSToolsAddMissingImports<CR>", desc = "TS Add missing imports" },
-			{ "<leader>to", "<cmd>TSToolsOrganizeImports<CR>", desc = "TS Organize Imports" },
-			{ "<leader>tgd", "<cmd>TSToolsGoToSourceDefinition<CR>", desc = "TS Go To Source Definition" },
-			{ "<leader>tfr", "<cmd>TSToolsFileReferences<CR>", desc = "TS Find File References" },
+			{ "<leader>tm", "<cmd>TsgoAddMissingImports<CR>", desc = "TS Add missing imports" },
+			{ "<leader>to", "<cmd>TsgoOrganizeImports<CR>", desc = "TS Organize Imports" },
+			{ "<leader>tgd", "<cmd>TsgoSourceDefinition<CR>", desc = "TS Go To Source Definition" },
+			{ "<leader>tfr", vim.lsp.buf.references, desc = "TS Find References" },
 		},
-		opts = {},
+		opts = { keymaps = { enable = false } },
 	},
 	{
 		"dmmulroy/tsc.nvim",
@@ -1270,8 +1267,34 @@ require("lazy").setup({
 			--  You could remove this setup call if you don't like it,
 			--  and try some other statusline plugin
 			local statusline = require("mini.statusline")
-			-- set use_icons to true if you have a Nerd Font
-			statusline.setup({ use_icons = vim.g.have_nerd_font })
+			local gpt4_tokens = require("gpt4_tokens")
+			gpt4_tokens.setup()
+			statusline.setup({
+				use_icons = vim.g.have_nerd_font,
+				content = {
+					active = function()
+						local mode, mode_hl = statusline.section_mode({ trunc_width = 120 })
+						local git = statusline.section_git({ trunc_width = 40 })
+						local diff = statusline.section_diff({ trunc_width = 75 })
+						local diagnostics = statusline.section_diagnostics({ trunc_width = 75 })
+						local lsp = statusline.section_lsp({ trunc_width = 75 })
+						local filename = statusline.section_filename({ trunc_width = 140 })
+						local fileinfo = statusline.section_fileinfo({ trunc_width = 120 })
+						local location = statusline.section_location({ trunc_width = 75 })
+						local search = statusline.section_searchcount({ trunc_width = 75 })
+						local tokens = gpt4_tokens.section()
+						return statusline.combine_groups({
+							{ hl = mode_hl, strings = { mode } },
+							{ hl = "MiniStatuslineDevinfo", strings = { git, diff, diagnostics, lsp } },
+							"%<",
+							{ hl = "MiniStatuslineFilename", strings = { filename } },
+							"%=",
+							{ hl = "MiniStatuslineFileinfo", strings = { fileinfo, tokens } },
+							{ hl = mode_hl, strings = { search, location } },
+						})
+					end,
+				},
+			})
 
 			-- You can configure sections in the statusline by overriding their
 			-- default behavior. For example, here we set the section for
@@ -1287,42 +1310,23 @@ require("lazy").setup({
 	},
 	{ -- Highlight, edit, and navigate code
 		"nvim-treesitter/nvim-treesitter",
+		lazy = false,
 		build = ":TSUpdate",
-		main = "nvim-treesitter.configs", -- Sets main module to use for opts
-		-- [[ Configure Treesitter ]] See `:help nvim-treesitter`
-		opts = {
-			ensure_installed = {
-				"bash",
-				"c",
-				"diff",
-				"html",
-				"lua",
-				"luadoc",
-				"markdown",
-				"markdown_inline",
-				"query",
-				"vim",
-				"vimdoc",
-				"typescript",
-				"javascript",
-			},
-			-- Autoinstall languages that are not installed
-			auto_install = true,
-			highlight = {
-				enable = true,
-				-- Some languages depend on vim's regex highlighting system (such as Ruby) for indent rules.
-				--  If you are experiencing weird indenting issues, add the language to
-				--  the list of additional_vim_regex_highlighting and disabled languages for indent.
-				additional_vim_regex_highlighting = { "ruby" },
-			},
-			indent = { enable = true, disable = { "ruby" } },
-		},
-		-- There are additional nvim-treesitter modules that you can use to interact
-		-- with nvim-treesitter. You should go explore a few and see what interests you:
-		--
-		--    - Incremental selection: Included, see `:help nvim-treesitter-incremental-selection-mod`
-		--    - Show your current context: https://github.com/nvim-treesitter/nvim-treesitter-context
-		--    - Treesitter + textobjects: https://github.com/nvim-treesitter/nvim-treesitter-textobjects
+		config = function()
+			local languages = {
+				"bash", "c", "diff", "html", "lua", "luadoc", "markdown",
+				"markdown_inline", "query", "vim", "vimdoc", "typescript", "javascript",
+			}
+			require("nvim-treesitter").setup()
+			require("nvim-treesitter").install(languages)
+			vim.api.nvim_create_autocmd("FileType", {
+				pattern = languages,
+				callback = function(args)
+					vim.treesitter.start(args.buf)
+					vim.bo[args.buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+				end,
+			})
+		end,
 	},
 
 	-- The following two comments only work if you have downloaded the kickstart repo, not just copy pasted the

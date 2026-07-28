@@ -1,0 +1,30 @@
+{
+  "modelAliases": {
+    "old-reviewer-model": "xai/grok-4.5:high",
+    "reviewer-model": "anthropic/claude-opus-5:high",
+    "cheap-model": "openai-codex/gpt-5.6-luna:high",
+    "scout-model": "cheap-model",
+    "tests-expert": "cheap-model",
+    "developer-model": "cheap-model:xhigh"
+  },
+  "disabledAgentResources": {
+    "skills": [
+      "**",
+      "!herdr",
+      "!triage",
+      "!chrome-cdp",
+      "!image-generation"
+    ],
+    "extensions": [
+      "**",
+      "!**/extensions/live-dashboard.ts",
+      "!**/pi-anthropic-oauth/**",
+      "!**/pi-codex-image/**",
+      "!**/pi-hashline-edit-pro/**",
+      "!**/@sting8k/pi-vcc/**"
+    ]
+  },
+  "extensions": {
+    "herdr": { "enableFullyInspectableMode": true }
+  }
+}

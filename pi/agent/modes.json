@@ -1,0 +1,9 @@
+{
+  "modes": {
+    "advisor": {
+      "provider": "openai-codex",
+      "modelId": "gpt-5.6-luna",
+      "thinkingLevel": "high"
+    }
+  }
+}

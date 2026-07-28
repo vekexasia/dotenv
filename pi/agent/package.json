@@ -1,0 +1,21 @@
+{
+  "name": "pi-config",
+  "version": "1.0.0",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions"
+    ],
+    "skills": [
+      "skills"
+    ]
+  },
+  "dependencies": {
+    "typebox": "^1.3.8"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.82.1"
+  }
+}
