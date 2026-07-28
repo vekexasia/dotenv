@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import {
   registerWorkflowExtension,
   type WorkflowExtension,
-} from "../../../../git/personale/pi-workflows/packages/core/dist/src/index.js";
+} from "../../../../../../personale/pi-workflows/packages/core/dist/src/index.js";
 export const tddDev: WorkflowExtension = {
   version: "1.0.0",
   headline: "TDD development",

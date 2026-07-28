@@ -3,7 +3,7 @@ import {
   registerWorkflowExtension,
   type JsonValue,
   type WorkflowExtension,
-} from "../../../../git/personale/pi-workflows/packages/core/dist/src/index.js";
+} from "../../../../../../personale/pi-workflows/packages/core/dist/src/index.js";
 
 const inputSchema = Type.Object(
   {

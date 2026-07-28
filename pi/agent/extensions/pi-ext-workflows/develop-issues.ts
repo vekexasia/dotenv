@@ -6,7 +6,7 @@ import {
   type WorkflowExtension,
   type WorkflowFunctionContext,
   type WorkflowWorktreeReference,
-} from "../../../../git/personale/pi-workflows/packages/core/dist/src/index.js";
+} from "../../../../../../personale/pi-workflows/packages/core/dist/src/index.js";
 
 const loopResultSchema = Type.Object(
   {
