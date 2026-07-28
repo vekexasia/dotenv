@@ -31,6 +31,7 @@ append_once() {
 }
 
 sync_pi() {
+  [ "$(readlink -f "$HOME/.pi/agent" 2>/dev/null || true)" = "$REPO_DIR/pi/agent" ] && return
   mkdir -p "$HOME/.pi/agent"
   rsync -a --delete \
     --exclude=.git --exclude=auth.json --exclude=ha.json --exclude='ha.json.*' \
