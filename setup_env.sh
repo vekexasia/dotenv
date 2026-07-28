@@ -6,14 +6,14 @@ IS_WSL=0
 grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
 
 install_package() {
-  local repository=$1 asset_pattern=$2 binary=$3
-  [ -x "$HOME/.bin/$binary" ] || command -v "$binary" >/dev/null 2>&1 && return
+  local command_name=$1 package_name=${2:-$1}
+  command -v "$command_name" >/dev/null 2>&1 && return
   sudo apt-get install -y "$package_name"
 }
 
 install_release() {
   local repository=$1 asset_pattern=$2 binary=$3
-  command -v "$binary" >/dev/null 2>&1 && return
+  { [ -x "$HOME/.bin/$binary" ] || command -v "$binary" >/dev/null 2>&1; } && return
   local workdir url
   workdir=$(mktemp -d)
   url=$(curl -fsSL "https://api.github.com/repos/$repository/releases/latest" | jq -r ".assets[] | select(.name | test(\"$asset_pattern\")) | .browser_download_url" | head -1)
