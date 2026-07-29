@@ -120,3 +120,4 @@ sync_pi
 command -v herdr >/dev/null 2>&1 && herdr integration install pi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
+nvim --headless "+Lazy! sync" +qa
