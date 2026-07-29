@@ -9,7 +9,7 @@ git clone https://github.com/vekexasia/dotenv.git ~/git/personale/dotenv
 ~/git/personale/dotenv/setup_env.sh
 ```
 
-Managed: Neovim, tmux, WezTerm (WSL), clipboard helpers, Pi, and shell additions. The script preserves Pi credentials and runtime state, including `~/.pi/agent/auth.json` and sessions.
+Managed: Neovim, tmux, WezTerm (WSL), clipboard helpers, Pi, and shell additions. Pi configuration is linked from this checkout; existing credentials and runtime state are migrated into it.
 
 `gh` and `glab` are installed but still require `gh auth login` and `glab auth login`.
 
