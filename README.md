@@ -13,4 +13,4 @@ Managed: Neovim, tmux, WezTerm (WSL), clipboard helpers, Pi, and shell additions
 
 `gh` and `glab` are installed but still require `gh auth login` and `glab auth login`.
 
-Herdr is intentionally not managed yet.
+Herdr itself is not installed, but its Pi integration is refreshed when Herdr is present.

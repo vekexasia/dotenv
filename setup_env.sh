@@ -36,7 +36,7 @@ sync_pi() {
 
   mkdir -p "$HOME/.pi"
   if [ -e "$target" ]; then
-    rsync -a --delete \
+    rsync -a \
       --exclude=.git --exclude=auth.json --exclude=ha.json --exclude='ha.json.*' \
       --exclude=trust.json --exclude=sessions/ --exclude=git/ --exclude=node_modules/ \
       --exclude=npm/node_modules/ --exclude=models-store.json --exclude=.advisor-state.json \
@@ -117,5 +117,6 @@ if [ ! -x "$venv/bin/python" ]; then
 fi
 
 sync_pi
+command -v herdr >/dev/null 2>&1 && herdr integration install pi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)

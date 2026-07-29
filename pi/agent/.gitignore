@@ -14,6 +14,9 @@
 
 !/extensions/
 !/extensions/**
+/extensions/herdr-agent-state.ts
+!/bin/
+!/bin/**
 !/agents/
 !/agents/**
 !/prompts/
