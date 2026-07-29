@@ -89,11 +89,12 @@ if ! command -v go >/dev/null 2>&1; then
   rm -f "$archive"
 fi
 
-if [ ! -x /opt/nvim-linux-x86_64/bin/nvim ]; then
+nvim_bin=/opt/nvim-linux-x86_64/bin/nvim
+nvim_version=$([ -x "$nvim_bin" ] && "$nvim_bin" --version | head -1 | sed 's/^NVIM v//' || true)
+if [ "$(printf '%s\n' 0.12.0 "$nvim_version" | sort -V | head -1)" != 0.12.0 ]; then
   archive=$(mktemp)
   curl -fsSL https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz -o "$archive"
   sudo rm -rf /opt/nvim-linux-x86_64
-  sudo mkdir -p /opt/nvim-linux-x86_64
   sudo tar -C /opt -xzf "$archive"
   rm -f "$archive"
 fi
@@ -121,5 +122,5 @@ command -v herdr >/dev/null 2>&1 && herdr integration install pi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
 command -v tsgo >/dev/null 2>&1 || npm install -g @typescript/native-preview
-nvim --headless "+Lazy! restore" +qa
-nvim --headless "+lua require('nvim-treesitter').install({'bash','c','diff','html','lua','luadoc','markdown','markdown_inline','query','vim','vimdoc','typescript','javascript'}):wait(300000)" +qa
+"$nvim_bin" --headless "+Lazy! restore" +qa
+"$nvim_bin" --headless "+lua require('nvim-treesitter').install({'bash','c','diff','html','lua','luadoc','markdown','markdown_inline','query','vim','vimdoc','typescript','javascript'}):wait(300000)" +qa
