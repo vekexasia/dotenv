@@ -120,4 +120,6 @@ sync_pi
 command -v herdr >/dev/null 2>&1 && herdr integration install pi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
+command -v tsgo >/dev/null 2>&1 || npm install -g @typescript/native-preview
 nvim --headless "+Lazy! restore" +qa
+nvim --headless "+lua require('nvim-treesitter').install({'bash','c','diff','html','lua','luadoc','markdown','markdown_inline','query','vim','vimdoc','typescript','javascript'}):wait(300000)" +qa

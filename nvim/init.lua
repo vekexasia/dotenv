@@ -1319,7 +1319,9 @@ require("lazy").setup({
 				"markdown_inline", "query", "vim", "vimdoc", "typescript", "javascript",
 			}
 			require("nvim-treesitter").setup()
-			require("nvim-treesitter").install(languages)
+			if #vim.api.nvim_list_uis() > 0 then
+				require("nvim-treesitter").install(languages)
+			end
 			vim.api.nvim_create_autocmd("FileType", {
 				pattern = languages,
 				callback = function(args)
