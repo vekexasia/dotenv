@@ -264,11 +264,17 @@ Issue details:
           try {
             merge = await invoke("developUntilApproved", {
               task: prompt(
-                `Merge only the approved issue worktrees into the current main working tree.
-Do not merge failed issue worktrees. Use each approved result's worktree to
-identify the exact branch and path, merge the approved branches, resolve conflicts,
-run the full relevant test suite, commit the merge result, and leave the current
-working tree clean.
+                `Integrate only the approved issue worktrees into the current main working tree.
+Do not integrate failed issue worktrees. Process approved worktrees sequentially
+in the order provided. For each one:
+
+1. Rebase its branch onto the current main HEAD from its worktree.
+2. Resolve any conflicts and run the relevant tests.
+3. Fast-forward main to the rebased branch using git merge --ff-only.
+
+Do not create merge commits, squash commits, or cherry-pick commits. After all
+approved branches are integrated, run the full relevant test suite and leave
+the current working tree and approved worktrees clean.
 
 Approved issue results:
 {approvedResults}

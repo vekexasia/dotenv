@@ -25,6 +25,6 @@
     ]
   },
   "extensions": {
-    "herdr": { "enableFullyInspectableMode": true }
+    "herdr": { "enableFullyInspectableMode": false }
   }
 }
