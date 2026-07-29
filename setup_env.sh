@@ -103,7 +103,7 @@ install -Dm644 "$REPO_DIR/.tmux.conf" "$HOME/.tmux.conf"
 
 if [ "$IS_WSL" -eq 1 ]; then
   mkdir -p "$HOME/.local/bin"
-  rsync -a --delete "$REPO_DIR/.local/bin/" "$HOME/.local/bin/"
+  rsync -a "$REPO_DIR/.local/bin/" "$HOME/.local/bin/"
   if command -v powershell.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
     windows_home=$(powershell.exe -NoProfile -Command '$env:USERPROFILE' | tr -d '\r')
     [ -n "$windows_home" ] && install -Dm644 "$REPO_DIR/.wezterm.lua" "$(wslpath "$windows_home")/.wezterm.lua"
