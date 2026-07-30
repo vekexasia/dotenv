@@ -1082,10 +1082,15 @@ require("lazy").setup({
 						-- print(vim.inspect { '-c', config, '--fix-to-stdout', '--stdin', '--stdin-filename', '$FILENAME' })
 						return { "-c", config, "--fix-to-stdout", "--stdin", "--stdin-filename", "$FILENAME" }
 					end,
+					env = function(_, ctx)
+						if not vim.fs.root(ctx.dirname, "eslint.config.mjs") then
+							return { ESLINT_D_ROOT = vim.fn.stdpath("config") }
+						end
+					end,
 					cwd = function(_, ctx)
 						local root = vim.fs.root(ctx.dirname, { "package.json" })
 						--print(root)
-						return root
+						return root or ctx.dirname
 					end,
 				},
 			},
@@ -1098,6 +1103,7 @@ require("lazy").setup({
 				-- javascript = { "prettierd", "prettier", stop_after_first = true },
 				javascript = { "eslint_d_default" },
 				typescript = { "eslint_d_default" },
+				typescriptreact = { "eslint_d_default" },
 			},
 		},
 	},
