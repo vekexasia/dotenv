@@ -1006,7 +1006,18 @@ require("lazy").setup({
 		"faruzzy/tsgo.nvim",
 		ft = { "javascript", "javascriptreact", "javascript.jsx", "typescript", "typescriptreact", "typescript.tsx" },
 		keys = {
-			{ "<leader>tm", "<cmd>TsgoAddMissingImports<CR>", desc = "TS Add missing imports" },
+			{
+				"<leader>tm",
+				function()
+					vim.lsp.buf.code_action({
+						context = { only = { "quickfix" } },
+						filter = function(action)
+							return action.kind == "quickfix" and type(action.title) == "string" and action.title:match("^Add import") ~= nil
+						end,
+					})
+				end,
+				desc = "TS Add missing imports",
+			},
 			{ "<leader>to", "<cmd>TsgoOrganizeImports<CR>", desc = "TS Organize Imports" },
 			{ "<leader>tgd", "<cmd>TsgoSourceDefinition<CR>", desc = "TS Go To Source Definition" },
 			{ "<leader>tfr", vim.lsp.buf.references, desc = "TS Find References" },

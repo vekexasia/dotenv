@@ -1,44 +1,163 @@
 import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
 import {
-  registerWorkflowExtension,
+  defineWorkflowFunction,
   type JsonValue,
   type ShellResult,
-  type WorkflowExtension,
   type WorkflowFunctionContext,
   type WorkflowWorktreeReference,
-} from "../../../../../../personale/pi-workflows/packages/core/dist/src/index.js";
+} from "pi-extensible-workflows";
+import {
+  fetchIssueDetailsOutputSchema,
+  type IssueDetail,
+} from "./fetch-issue-details.js";
+import {
+  reviewLoopInputSchema,
+  reviewLoopOutputSchema,
+} from "./review-loop.js";
 
-const loopResultSchema = Type.Object(
-  {
-    pass: Type.Boolean(),
-    iterations: Type.Integer(),
-    devResult: Type.Any(),
-    review: Type.Object(
-      {
-        pass: Type.Boolean(),
-        findings: Type.Array(Type.String()),
-      },
-      { additionalProperties: false },
-    ),
+export const developIssues = defineWorkflowFunction({
+  description:
+    "Develop issues in parallel worktrees and merge approved results",
+  async run(
+    { issueDetails, maxIterations = 5 },
+    { agent, log, invoke, phase, shell, parallel, prompt, withWorktree },
+  ) {
+    const tasks: Record<string, () => Promise<IssueResult>> = {};
+    for (const issue of issueDetails) {
+      tasks[`issue-${issue.number}`] = () =>
+        withWorktree(`issue-${issue.number}`, async (worktree) => ({
+          devRes: reviewResult(
+            await invoke("developUntilApproved", {
+              task: issueTask(issue),
+              maxIterations,
+            }),
+          ),
+          worktree,
+        }));
+    }
+
+    phase("issues");
+    log(`Developing ${issueDetails.length} issue(s) in parallel worktrees`);
+    const issueResults = await parallel("issues", tasks);
+    const entries = Object.entries(issueResults);
+    const approvedEntries = entries.filter(([, result]) => result.devRes.pass);
+    const failedEntries = entries.filter(([, result]) => !result.devRes.pass);
+    const approvedResults = Object.fromEntries(approvedEntries);
+    const failedIssueNames = failedEntries.map(([name]) => name);
+    const approvedWorktrees = approvedEntries.map(
+      ([, result]) => result.worktree,
+    );
+
+    if (failedIssueNames.length > 0)
+      log(`Skipping failed issue worktrees: ${failedIssueNames.join(", ")}`);
+
+    let merge: Static<typeof reviewLoopOutputSchema> | null = null;
+    if (approvedWorktrees.length > 0) {
+      phase("merge");
+      let mergeFailure: unknown = null;
+      try {
+        merge = reviewResult(
+          await invoke("developUntilApproved", {
+            task: prompt(
+              `Integrate only the approved issue worktrees into the current main working tree.
+Do not integrate failed issue worktrees. Process approved worktrees sequentially in the order provided. For each one:
+
+1. Rebase its branch onto the current main HEAD from its worktree.
+2. Resolve conflicts and run the relevant tests.
+3. Fast-forward main to the rebased branch using git merge --ff-only.
+
+Do not create merge commits, squash commits, or cherry-pick commits. After all approved branches are integrated, run the relevant test suite and leave the current working tree and approved worktrees clean.
+
+Approved issue results:
+{approvedResults}
+Failed issue worktrees to skip:
+{failedIssueNames}`,
+              { approvedResults, failedIssueNames },
+            ),
+            maxIterations,
+          }),
+        );
+      } catch (error) {
+        mergeFailure = error;
+      }
+
+      const cleanup = await cleanupMergedWorktrees(shell, approvedWorktrees);
+      log(`Approved worktree cleanup: ${JSON.stringify(cleanup)}`);
+
+      if (mergeFailure !== null) throw mergeFailure;
+      if (cleanup.failed.length > 0)
+        throw new Error(
+          `Worktree cleanup failed: ${cleanup.failed.join("; ")}`,
+        );
+      if (!merge?.pass) throw new Error("Merged result failed review");
+    } else {
+      log("No approved issue worktrees to merge");
+    }
+
+    phase("summary");
+    const issues = issueDetails.map((issue) => issue.number);
+    const summary = await agent(
+      prompt(
+        `Summarize what succeeded, what failed review, what was tested, and what was merged. Do not change files.
+
+Issues:
+{issues}
+
+Issue results:
+{issueResults}
+
+Failed issues:
+{failedIssueNames}
+
+Merge result:
+{merge}`,
+        { issues, issueResults, failedIssueNames, merge },
+      ),
+      { role: "summarizer" },
+    );
+
+    return { issues, issueResults, merge, summary };
   },
-  { additionalProperties: false },
-);
+  input: Type.Object(
+    {
+      issueDetails: fetchIssueDetailsOutputSchema.properties.issueDetails,
+      maxIterations: reviewLoopInputSchema.properties.maxIterations,
+    },
+    { additionalProperties: false },
+  ),
+  output: Type.Object(
+    {
+      issues: Type.Array(Type.Integer()),
+      issueResults: Type.Object(
+        {},
+        {
+          additionalProperties: Type.Object(
+            {
+              devRes: reviewLoopOutputSchema,
+              worktree: Type.Object(
+                { path: Type.String(), branch: Type.String() },
+                { additionalProperties: false },
+              ),
+            },
+            { additionalProperties: false },
+          ),
+        },
+      ),
+      merge: Type.Union([reviewLoopOutputSchema, Type.Null()]),
+      summary: Type.Any(),
+    },
+    { additionalProperties: false },
+  ),
+});
 
-const issueResultSchema = Type.Object(
-  {
-    devRes: loopResultSchema,
-    worktree: Type.Object(
-      {
-        path: Type.String(),
-        branch: Type.String(),
-      },
-      { additionalProperties: false },
-    ),
-  },
-  { additionalProperties: false },
-);
+export const developIssuesInputSchema = developIssues.input;
+export const developIssuesOutputSchema = developIssues.output;
 
-type IssueResult = Static<typeof issueResultSchema>;
+type IssueResult = {
+  devRes: Static<typeof reviewLoopOutputSchema>;
+  worktree: { path: string; branch: string };
+};
 
 type WorktreeCleanup = {
   removed: string[];
@@ -46,80 +165,16 @@ type WorktreeCleanup = {
   failed: string[];
 };
 
+function reviewResult(value: JsonValue): Static<typeof reviewLoopOutputSchema> {
+  if (!Value.Check(reviewLoopOutputSchema, value))
+    throw new Error("developUntilApproved returned an unexpected result");
+  return value;
+}
+
 function shellFailure(name: string, result: ShellResult): string {
   const detail =
     result.stderr || result.stdout || `git exited ${String(result.exitCode)}`;
   return `${name}: ${detail.trim()}`;
-}
-
-type IssueDetailResult = {
-  title: string;
-  content: string;
-  comments: Array<{ author: string; comment: string }>;
-};
-async function getIssueDetail(
-  shell: WorkflowFunctionContext["shell"],
-  issueId: number,
-): Promise<IssueDetailResult> {
-  const options = { env: { PI_ISSUE_ID: String(issueId) } };
-  const ghResult = await shell(
-    'gh issue view "$PI_ISSUE_ID" --json title,body,comments',
-    options,
-  );
-  let result = ghResult;
-  if (result.exitCode !== 0) {
-    const glabResult = await shell(
-      'glab issue view "$PI_ISSUE_ID" --comments --output json',
-      options,
-    );
-    if (glabResult.exitCode !== 0)
-      throw new Error(
-        `${shellFailure("gh issue view", ghResult)}; ${shellFailure("glab issue view", glabResult)}`,
-      );
-    result = glabResult;
-  }
-
-  let issue: {
-    title?: unknown;
-    body?: unknown;
-    description?: unknown;
-    comments?: unknown;
-    notes?: unknown;
-  };
-  try {
-    issue = JSON.parse(result.stdout) as typeof issue;
-  } catch {
-    throw new Error(`Issue #${String(issueId)} returned invalid JSON`);
-  }
-
-  if (typeof issue.title !== "string")
-    throw new Error(`Issue #${String(issueId)} is missing a title`);
-  const content = issue.body ?? issue.description ?? "";
-  if (typeof content !== "string")
-    throw new Error(`Issue #${String(issueId)} is missing valid content`);
-
-  const rawComments = issue.comments ?? issue.notes ?? [];
-  if (!Array.isArray(rawComments))
-    throw new Error(`Issue #${String(issueId)} has invalid comments`);
-  const comments = rawComments.map((rawComment) => {
-    if (rawComment === null || typeof rawComment !== "object")
-      throw new Error(`Issue #${String(issueId)} has an invalid comment`);
-    const comment = rawComment as Record<string, unknown>;
-    const authorValue = comment.author;
-    const author =
-      typeof authorValue === "string"
-        ? authorValue
-        : authorValue !== null && typeof authorValue === "object"
-          ? ((authorValue as Record<string, unknown>).login ??
-            (authorValue as Record<string, unknown>).username)
-          : undefined;
-    const body = comment.body ?? comment.comment;
-    if (typeof author !== "string" || typeof body !== "string")
-      throw new Error(`Issue #${String(issueId)} has an invalid comment`);
-    return { author, comment: body };
-  });
-
-  return { title: issue.title, content, comments };
 }
 
 async function cleanupMergedWorktrees(
@@ -174,168 +229,11 @@ async function cleanupMergedWorktrees(
   return cleanup;
 }
 
-export const developIssuesExtension: WorkflowExtension = {
-  version: "1.0.0",
-  headline: "Parallel issue development",
-  description:
-    "Develops GitHub issues in isolated worktrees, merges approved results, and summarizes the work.",
-  functions: {
-    developIssuesUntilApproved: {
-      description:
-        "Develop issue numbers in parallel worktrees, merge them into main after review, then summarize the result. Issue info is automatically fetched",
-      input: Type.Object(
-        {
-          issues: Type.Array(Type.Integer({ minimum: 1 }), {
-            minItems: 1,
-            uniqueItems: true,
-          }),
-          maxIterations: Type.Optional(Type.Integer({ minimum: 1 })),
-        },
-        { additionalProperties: false },
-      ),
-      output: Type.Object(
-        {
-          issues: Type.Array(Type.Integer()),
-          issueResults: Type.Object(
-            {},
-            { additionalProperties: issueResultSchema },
-          ),
-          merge: Type.Union([loopResultSchema, Type.Null()]),
-          summary: Type.Any(),
-        },
-        { additionalProperties: false },
-      ),
-      async run(
-        input,
-        { agent, log, invoke, phase, shell, parallel, prompt, withWorktree },
-      ) {
-        const issues = input.issues as number[];
-        const maxIterations = (input.maxIterations as number | undefined) ?? 5;
-        const tasks: Record<string, () => Promise<JsonValue>> = {};
-
-        for (const issue of issues) {
-          tasks[`issue-${issue}`] = () =>
-            withWorktree(`issue-${issue}`, async (worktree) => {
-              const issueDetail = await getIssueDetail(shell, issue);
-              const devRes = await invoke("developUntilApproved", {
-                task: `Resolve issue #${issue} in the current repository. The final commit should reference the issue.
+function issueTask(issue: IssueDetail): string {
+  return `Resolve issue #${issue.number} in the current repository. The final commit should reference the issue.
 Issue details:
-<issue_number>${issue}</issue_number>
-<issue_title>${issueDetail.title}</issue_title>
-<issue_content>${issueDetail.content}</issue_content>
-<issue_comments>${JSON.stringify(issueDetail.comments, null, 2)}</issue_comments>`,
-                maxIterations,
-              });
-
-              return { devRes, worktree };
-            });
-        }
-
-        phase("issues");
-        log(`Developing ${issues.length} issue(s) in parallel worktrees`);
-        const issueResults = await parallel("issues", tasks);
-        const entries = Object.entries(
-          issueResults as Record<string, IssueResult>,
-        );
-        const approvedEntries = entries.filter(
-          ([, result]) => result.devRes.pass,
-        );
-        const failedEntries = entries.filter(
-          ([, result]) => !result.devRes.pass,
-        );
-        const approvedResults = Object.fromEntries(approvedEntries);
-        const failedResults = Object.fromEntries(failedEntries);
-        const failedIssueNames = Object.keys(failedResults);
-
-        if (failedIssueNames.length > 0)
-          log(
-            `Skipping failed issue worktrees: ${failedIssueNames.join(", ")}\n${JSON.stringify(failedResults)}`,
-          );
-
-        const approvedWorktrees = approvedEntries.map(
-          ([, result]) => result.worktree,
-        );
-
-        let merge: JsonValue = null;
-        if (approvedWorktrees.length > 0) {
-          phase("merge");
-          log("Merging approved issue worktrees into main");
-          let mergeFailure: unknown = null;
-          try {
-            merge = await invoke("developUntilApproved", {
-              task: prompt(
-                `Integrate only the approved issue worktrees into the current main working tree.
-Do not integrate failed issue worktrees. Process approved worktrees sequentially
-in the order provided. For each one:
-
-1. Rebase its branch onto the current main HEAD from its worktree.
-2. Resolve any conflicts and run the relevant tests.
-3. Fast-forward main to the rebased branch using git merge --ff-only.
-
-Do not create merge commits, squash commits, or cherry-pick commits. After all
-approved branches are integrated, run the full relevant test suite and leave
-the current working tree and approved worktrees clean.
-
-Approved issue results:
-{approvedResults}
-Failed issue worktrees to skip:
-{failedIssueNames}`,
-                {
-                  approvedResults,
-                  failedIssueNames,
-                },
-              ),
-              maxIterations,
-            });
-          } catch (error) {
-            mergeFailure = error;
-          }
-
-          const cleanup = await cleanupMergedWorktrees(
-            shell,
-            approvedWorktrees,
-          );
-          log(`Approved worktree cleanup: ${JSON.stringify(cleanup)}`);
-
-          if (mergeFailure !== null) throw mergeFailure;
-          if (cleanup.failed.length > 0)
-            throw new Error(
-              `Worktree cleanup failed: ${cleanup.failed.join("; ")}`,
-            );
-          if (!(merge as { pass?: boolean }).pass)
-            throw new Error("Merged result failed review");
-        } else {
-          log("No approved issue worktrees to merge");
-        }
-
-        phase("summary");
-        const summary = await agent(
-          prompt(
-            `Summarize what succeeded, what failed review, what was tested, and what
-was merged. Do not change files.
-
-Issues:
-{issues}
-
-Issue results:
-{issueResults}
-
-Failed issues:
-{failedIssueNames}
-
-Merge result:
-{merge}`,
-            { issues, issueResults, failedIssueNames, merge },
-          ),
-          { role: "summarizer" },
-        );
-
-        return { issues, issueResults, merge, summary };
-      },
-    },
-  },
-};
-
-export default function (): void {
-  registerWorkflowExtension(developIssuesExtension);
+<issue_number>${issue.number}</issue_number>
+<issue_title>${issue.title}</issue_title>
+<issue_content>${issue.content}</issue_content>
+<issue_comments>${JSON.stringify(issue.comments, null, 2)}</issue_comments>`;
 }
