@@ -37,7 +37,7 @@
 For complex work use the workflow tool. You should pick the proper agent per task unless specified. Check model aliases.
 Do not use other models unless requested by the user.
 
-Right before calling workflow tool, design the script that will be then passed to workflow's `script` param and save it in /tmp. Then call `~/.pi/agent/bin/open-nvim.sh <path_to_file>` so the operator can view & edit the script. never revert or fix operators changes. the `open-nvim` binary will automatically wait until the operator finishes its review. Await for operator instructions.
+Prefer an existing workflow function when it matches the task; inspect `workflow_catalog` first. Before calling the workflow tool, write the executable JavaScript workflow script to `/tmp`, including calls to any existing workflow functions; never substitute a JSON tool invocation. Open the script with `~/.pi/agent/bin/open-nvim.sh <path>` for operator review. Never alter operator edits. 
 
 When using workflow, unless specified, launch it in foreground and without any kind of budget limits.
 

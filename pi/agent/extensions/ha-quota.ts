@@ -4,11 +4,9 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// Quota for ALL openai-codex and anthropic credentials stored in
-// pi-high-availability's ha.json. Replaces pi-quota-status: anthropic quota
-// comes from api.anthropic.com/api/oauth/usage (OAuth), no HAR cookie needed.
+// Quota for the openai-codex and anthropic credentials in auth.json.
+// Anthropic quota comes from its OAuth usage endpoint, so no HAR cookie is needed.
 
-const HA_PATH = join(homedir(), ".pi", "agent", "ha.json");
 const AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
 const STATUS_KEY = "ha-quota";
 const REFRESH_MS = 300_000;
@@ -19,23 +17,9 @@ interface Quota { name: string; label: string; active?: boolean; fiveHour?: Wind
 
 function readCreds(provider: string): Cred[] {
   try {
-    const creds = JSON.parse(readFileSync(HA_PATH, "utf8"))?.credentials?.[provider] ?? {};
-    return Object.entries(creds)
-      .filter(([name, v]: [string, any]) => name !== "__meta" && v?.refresh)
-      .map(([name, v]: [string, any]) => ({ name, ...(v as object) }) as Cred);
+    const cred = JSON.parse(readFileSync(AUTH_PATH, "utf8"))?.[provider];
+    return cred?.refresh ? [{ name: "primary", ...cred } as Cred] : [];
   } catch { return []; }
-}
-function activeAuth(provider: string): Partial<Cred> | undefined {
-  try { return JSON.parse(readFileSync(AUTH_PATH, "utf8"))?.[provider]; } catch { return; }
-}
-
-function isActiveCred(provider: string, cred: Cred): boolean {
-  const auth = activeAuth(provider);
-  return !!auth && (
-    (!!cred.accountId && cred.accountId === auth.accountId) ||
-    (!!cred.refresh && cred.refresh === auth.refresh) ||
-    (!!cred.key && cred.key === auth.key)
-  );
 }
 // Pretty output shows credential handle + masked email; compact status keeps handles only.
 const emailCache = new Map<string, string>();
@@ -178,10 +162,10 @@ function withFallback(key: string, quota: Quota): Quota {
 
 async function fetchAll(): Promise<{ codex: Quota[]; claude: Quota[] }> {
   const codexCreds = readCreds("openai-codex");
-  const anthropicCreds = readCreds("anthropic").filter((c) => c.name === "primary" || c.expires > Date.now());
+  const anthropicCreds = readCreds("anthropic");
   const [codex, claude] = await Promise.all([
-    Promise.all(codexCreds.map(async (c) => ({ ...withFallback(`codex:${c.name}`, await codexQuota(c)), active: isActiveCred("openai-codex", c) }))),
-    Promise.all(anthropicCreds.map(async (c) => ({ ...withFallback(`anthropic:${c.name}`, await anthropicQuota(c)), active: isActiveCred("anthropic", c) }))),
+    Promise.all(codexCreds.map(async (c) => ({ ...withFallback(`codex:${c.name}`, await codexQuota(c)), active: true }))),
+    Promise.all(anthropicCreds.map(async (c) => ({ ...withFallback(`anthropic:${c.name}`, await anthropicQuota(c)), active: true }))),
   ]);
   return { codex, claude };
 }
@@ -238,7 +222,7 @@ export default function haQuota(pi: ExtensionAPI) {
   let refreshing = false;
 
   pi.registerCommand("ha-quota", {
-    description: "Show remaining quota for all openai-codex and anthropic credentials in ha.json",
+    description: "Show remaining quota for openai-codex and anthropic credentials in auth.json",
     handler: async (_args, cmdCtx) => {
       const mode = (cmdCtx as unknown as { mode?: string }).mode;
       if (mode !== "tui") {
