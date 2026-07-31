@@ -22,7 +22,7 @@
     "npm:@tintinweb/pi-subagents",
     "npm:@narumitw/pi-goal",
     "git:github.com/DietrichGebert/ponytail",
-    "git:github.com/pasky/pi-omplike-advisor",
+    "packages/pi-omplike-advisor",
     "npm:pi-tool-display",
     "git:github.com/YuGiMob/pi-hashline-edit-pro",
     "git:github.com/vekexasia/pi-notify@feat/customizable-notifications",

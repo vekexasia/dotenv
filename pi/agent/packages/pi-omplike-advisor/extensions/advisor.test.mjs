@@ -1,0 +1,1848 @@
+/**
+ * Tests for the /advisor extension (a persistent second model that reviews each
+ * turn and injects advice). Mirrors review.test.mjs structure.
+ *
+ * Layers:
+ *   1. pure logic        — severity helpers, backoff, terminal detection, arg
+ *                          parsing, advisory/​delta formatting, AdviseTool dedup
+ *                          (no model/network/TUI)
+ *   1b. runtime mechanics — always-hold + catch-up block: runTurnBlock branches
+ *                          (stub runtime) and the real AdvisorRuntime + stub
+ *                          Agent (hold → reconfirm → deliver/drop, settle waits)
+ *   2. real loader       — the extension registers through pi's loader
+ *   3. render path        — the advisory renderer shows notes by severity
+ *   4. pi harness (E2E)  — drive a real `pi --mode rpc` and verify a nit is
+ *                          delivered at its turn boundary and triggers a turn. Gated
+ *                          behind ADVISOR_E2E=1 (needs anthropic auth + network;
+ *                          spawns pi with ADVISOR_NO_REVIEW so the advisor model
+ *                          never fires — only the deterministic `/advisor test`
+ *                          nit hook does; high-sev needs the runtime, covered in 1b).
+ *
+ * Run:  node packages/pi-omplike-advisor/extensions/advisor.test.mjs              (fast, offline)
+ *       ADVISOR_E2E=1 node packages/pi-omplike-advisor/extensions/advisor.test.mjs (also the pi harness)
+ */
+
+import assert from "node:assert/strict";
+import { spawn, execSync } from "node:child_process";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PI_BIN = execSync("command -v pi").toString().trim();
+// PI_DIST overrides bin-based resolution (needed when `pi` is a wrapper script
+// rather than a symlink into the install, e.g. pointing at a pi-mono checkout).
+const DIST = process.env.PI_DIST ?? dirname(execSync(`readlink -f ${PI_BIN}`).toString().trim());
+
+const { createExtensionRuntime, loadExtensions } = await import(`${DIST}/core/extensions/loader.js`);
+const { createEventBus } = await import(`${DIST}/core/event-bus.js`);
+const { CustomMessageComponent } = await import(`${DIST}/modes/interactive/components/custom-message.js`);
+const { initTheme } = await import(`${DIST}/modes/interactive/theme/theme.js`);
+
+// advisor.ts has @earendil-works/* value imports; reach its exported pure helpers
+// through jiti with the same aliases pi's extension loader uses.
+const piRequire = createRequire(`${DIST}/index.js`);
+const jitiDir = dirname(piRequire.resolve("jiti/package.json"));
+const { createJiti } = await import(`${jitiDir}/lib/jiti-static.mjs`);
+// node_modules sits beside dist in an npm install, but is hoisted to the repo
+// root in a pi-mono checkout — probe both.
+const NM = [resolve(DIST, "..", "node_modules"), resolve(DIST, "..", "..", "..", "node_modules")].find((d) =>
+	existsSync(join(d, "@earendil-works")),
+);
+const pkgEntry = (pkg) => resolve(NM, "@earendil-works", pkg, "dist/index.js");
+const { Agent: CoreAgent, setDefaultStreamFn } = await import(pkgEntry("pi-agent-core"));
+const { EventStream } = await import(resolve(NM, "@earendil-works", "pi-ai", "dist/compat.js"));
+const ALIAS = {
+	"@earendil-works/pi-coding-agent": `${DIST}/index.js`,
+	"@earendil-works/pi-agent-core": pkgEntry("pi-agent-core"),
+	"@earendil-works/pi-tui": pkgEntry("pi-tui"),
+	"@earendil-works/pi-ai": pkgEntry("pi-ai"),
+	typebox: resolve(NM, "typebox", "build", "index.mjs"),
+};
+const jiti = createJiti(import.meta.url, { moduleCache: false, alias: ALIAS });
+const A = await jiti.import(resolve(HERE, "advisor.ts"));
+
+// formatTurnDelta returns a markdown string with verbatim (un-escaped) content.
+const renderDelta = (o) => A.formatTurnDelta(o);
+
+initTheme();
+
+let passed = 0;
+const tests = [];
+const test = (name, fn) => tests.push([name, fn]);
+const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
+// ===========================================================================
+// 1. pure logic
+// ===========================================================================
+
+test("isHighSeverity: only concern/blocker are held + reconfirmed", () => {
+	assert.equal(A.isHighSeverity(undefined), false);
+	assert.equal(A.isHighSeverity("nit"), false);
+	assert.equal(A.isHighSeverity("concern"), true);
+	assert.equal(A.isHighSeverity("blocker"), true);
+});
+
+test("nextBackoffMs: base, doubling, capped, guarded", () => {
+	assert.equal(A.nextBackoffMs(0, 15000, 120000), 15000);
+	assert.equal(A.nextBackoffMs(1, 15000, 120000), 30000);
+	assert.equal(A.nextBackoffMs(2, 15000, 120000), 60000);
+	assert.equal(A.nextBackoffMs(3, 15000, 120000), 120000);
+	assert.equal(A.nextBackoffMs(4, 15000, 120000), 120000); // capped
+	assert.equal(A.nextBackoffMs(-1, 15000, 120000), 15000); // negative guarded to base
+	assert.equal(A.nextBackoffMs(0), 15000); // defaults
+});
+
+test("isTerminalTurn: terminal iff the assistant message made no tool calls", () => {
+	assert.equal(A.isTerminalTurn({ content: [{ type: "text" }] }), true);
+	assert.equal(A.isTerminalTurn({ content: [] }), true);
+	assert.equal(A.isTerminalTurn(undefined), true);
+	assert.equal(A.isTerminalTurn({ content: [{ type: "toolCall" }] }), false);
+	assert.equal(A.isTerminalTurn({ content: [{ type: "text" }, { type: "toolCall" }] }), false);
+});
+
+test("formatReconfirmPreamble: empty when nothing held, else lists held notes", () => {
+	assert.equal(A.formatReconfirmPreamble([]), "");
+	const p = A.formatReconfirmPreamble([
+		{ note: "races on shared map", severity: "blocker" },
+		{ note: "missing await", severity: "concern" },
+	]);
+	assert.match(p, /Held advisories — reconfirm/);
+	assert.match(p, /call `advise` again/);
+	assert.match(p, /- \[BLOCKER\] races on shared map/);
+	assert.match(p, /- \[CONCERN\] missing await/);
+	assert.match(p, /\n---\n/); // separates preamble from the session update below
+});
+
+test("parseAdvisorTestArgs: valid severities + multiword note", () => {
+	assert.deepEqual(A.parseAdvisorTestArgs("test nit be tidy"), { severity: "nit", note: "be tidy" });
+	assert.deepEqual(A.parseAdvisorTestArgs("test  concern   wrong path here"), {
+		severity: "concern",
+		note: "wrong path here",
+	});
+	assert.deepEqual(A.parseAdvisorTestArgs("test BLOCKER STOP NOW"), { severity: "blocker", note: "STOP NOW" });
+});
+
+test("parseAdvisorTestArgs: rejects bad input", () => {
+	assert.equal(A.parseAdvisorTestArgs("test"), null);
+	assert.equal(A.parseAdvisorTestArgs("test nit"), null); // no note
+	assert.equal(A.parseAdvisorTestArgs("test bogus hi"), null); // bad severity
+	assert.equal(A.parseAdvisorTestArgs("status"), null);
+});
+
+test("advisor model configuration parses provider/model and thinking level", () => {
+	assert.deepEqual(A.parseAdvisorModelArgs("model openrouter/z-ai/glm-5.2 high"), {
+		model: { provider: "openrouter", modelId: "z-ai/glm-5.2" },
+		thinkingLevel: "high",
+	});
+	assert.deepEqual(A.parseAdvisorModelArgs("model openai-codex/gpt-5.6-luna"), {
+		model: { provider: "openai-codex", modelId: "gpt-5.6-luna" },
+	});
+	assert.equal(A.parseAdvisorModelArgs("model nope"), null);
+	assert.equal(A.parseAdvisorModelArgs("model p/m invalid"), null);
+});
+
+test("advisor session state is disabled by default and isolated to the active branch", () => {
+	assert.deepEqual(A.readAdvisorSessionState([]), { enabled: false });
+	const first = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: { provider: "p1", modelId: "m1" } } }];
+	const second = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: "low" } }];
+	assert.deepEqual(A.readAdvisorSessionState(first), { enabled: true, model: { provider: "p1", modelId: "m1" } });
+	assert.deepEqual(A.readAdvisorSessionState(second), { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: "low" });
+});
+
+test("advisor runtime changes defer while a review is busy", () => {
+	assert.equal(A.advisorRuntimeChangePolicy(true, false), "defer");
+	assert.equal(A.advisorRuntimeChangePolicy(false, false), "rebuild");
+	assert.equal(A.advisorRuntimeChangePolicy(true, true), "reuse");
+});
+
+test("formatAdvisoryContent: wraps with severity + guidance, escapes XML", () => {
+	const c = A.formatAdvisoryContent([{ note: "use <T> & stuff", severity: "concern" }]);
+	assert.match(c, /<advisory severity="concern" guidance="weigh, don't blindly obey">/);
+	assert.match(c, /use &lt;T&gt; &amp; stuff/);
+	assert.match(c, /<\/advisory>/);
+});
+
+test("formatAdvisoryContent: omits severity attr when absent (plain nit)", () => {
+	const c = A.formatAdvisoryContent([{ note: "tidy up" }]);
+	assert.doesNotMatch(c, /severity=/);
+	assert.match(c, /<advisory guidance=/);
+});
+
+test("formatAdvisoryContent: stale option tags advice as about an earlier step", () => {
+	const c = A.formatAdvisoryContent([{ note: "rename", severity: "nit" }], { stale: true });
+	assert.match(c, /context="raised about an earlier step"/);
+	assert.doesNotMatch(A.formatAdvisoryContent([{ note: "rename", severity: "nit" }]), /context=/);
+});
+
+test("formatAdvisoryContent: finalAnswer appends self-contained-final-answer guidance", () => {
+	const c = A.formatAdvisoryContent([{ note: "fix bug", severity: "blocker" }], { finalAnswer: true });
+	assert.match(c, /<\/advisory>/);
+	assert.match(c, /self-contained final answer/);
+	assert.match(c, /do NOT write a terse follow-up/);
+	// absent without the option
+	assert.doesNotMatch(A.formatAdvisoryContent([{ note: "fix bug", severity: "blocker" }]), /self-contained final answer/);
+});
+
+test("formatTurnDelta: includes user, thinking, text, tool call + result", () => {
+	const md = renderDelta({
+		userPrompt: "do the thing",
+		assistant: {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "let me think" },
+				{ type: "text", text: "here is my plan" },
+				{ type: "toolCall", id: "1", name: "write", arguments: { path: "a.js" } },
+			],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+		toolResults: [{ role: "toolResult", toolCallId: "1", toolName: "write", content: [{ type: "text", text: "wrote a.js" }], isError: false, timestamp: 2 }],
+	});
+	assert.match(md, /#### User\n\ndo the thing/);
+	assert.match(md, /<thinking>\nlet me think\n<\/thinking>/);
+	assert.match(md, /here is my plan/);
+	assert.match(md, /→ tool `write`:\npath: a\.js/);
+	assert.match(md, /#### Tool result: `write`\n\nwrote a\.js/);
+});
+
+test("formatTurnDelta: a multi-line bash command rides verbatim (no \\n escaping)", () => {
+	const cmd = "cat > /tmp/x <<'EOF'\nline one\nline two\nEOF";
+	const md = renderDelta({
+		assistant: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "1", name: "bash", arguments: { command: cmd } }],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+	});
+	assert.ok(md.includes(cmd), "command preserved verbatim with REAL newlines");
+	assert.ok(!md.includes("\\n"), "no literal backslash-n escapes (the bug this fixes)");
+});
+
+test("formatTurnDelta: edits render as compact header + result diff (no raw old/new blobs)", () => {
+	const diff = "  10 unchanged\n- 11 bootstrap 0/0\n+ 11 bootstrap 0.045% (9/20000)\n  12 unchanged";
+	const md = renderDelta({
+		assistant: {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "1",
+					name: "edit",
+					arguments: {
+						path: "RESULTS.md",
+						edits: [
+							{ oldText: "bootstrap 0/0", newText: "bootstrap 0.045% (9/20000)" },
+							{ oldText: "x", newText: "y" },
+						],
+					},
+				},
+			],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+		toolResults: [
+			{
+				role: "toolResult",
+				toolCallId: "1",
+				toolName: "edit",
+				content: [{ type: "text", text: "Successfully replaced 2 block(s)." }],
+				details: { diff },
+				isError: false,
+				timestamp: 2,
+			},
+		],
+	});
+	// compact toolCall header, not the raw {oldText,newText} JSON dump
+	assert.ok(md.includes("→ tool `edit`(RESULTS.md) — 2 block(s); diff in tool result"));
+	// the result body is the marked diff (with -/+ framing), not the success text
+	assert.ok(md.includes("- 11 bootstrap 0/0"));
+	assert.ok(md.includes("+ 11 bootstrap 0.045% (9/20000)"));
+	// the stale pre-edit blob must NOT appear as an unannotated peer (only inside the diff, prefixed)
+	assert.ok(!md.includes('"oldText"'));
+	assert.ok(!md.includes("Successfully replaced"));
+});
+
+test("formatTurnDelta: a failed edit (no diff) keeps its attempted args for diagnosis", () => {
+	const md = renderDelta({
+		assistant: {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "9", name: "edit", arguments: { path: "f.py", edits: [{ oldText: "needle that did not match", newText: "x" }] } },
+			],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+		// failed edit: error result, NO details.diff
+		toolResults: [
+			{ role: "toolResult", toolCallId: "9", toolName: "edit", content: [{ type: "text", text: "Error: oldText not found" }], isError: true, timestamp: 2 },
+		],
+	});
+	assert.ok(md.includes("needle that did not match"), "attempted oldText must survive when there is no diff");
+	assert.ok(!md.includes("diff in tool result"), "no compact/diff header without a diff");
+	assert.ok(md.includes("`edit` (error)"), "the error is still shown");
+});
+
+test("formatTurnDelta: a multi-line failed edit preserves real newlines in old/new", () => {
+	const oldText = "def foo():\n    return 1";
+	const md = renderDelta({
+		assistant: {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "9", name: "edit", arguments: { path: "f.py", edits: [{ oldText, newText: "def foo():\n    return 2" }] } },
+			],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+		toolResults: [{ role: "toolResult", toolCallId: "9", toolName: "edit", content: [{ type: "text", text: "Error: not found" }], isError: true, timestamp: 2 }],
+	});
+	assert.ok(md.includes(oldText), "multi-line oldText preserved verbatim");
+	assert.ok(!md.includes("def foo():\\n"), "no \\n escaping in failed-edit args");
+});
+
+test("formatTurnDelta: a multi-line string NESTED in a non-edits container survives verbatim", () => {
+	// Locks the general principle behind dropping safeJson: newlines are preserved at
+	// EVERY depth, not just for top-level string args or the special-cased `edits`.
+	const script = "#!/bin/sh\nset -e\nrun foo";
+	const md = renderDelta({
+		assistant: {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "1", name: "custom", arguments: { spec: { script, retries: 3 } } }],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+	});
+	assert.ok(md.includes(script), "nested multi-line string rides verbatim (no JSON.stringify escaping)");
+	assert.ok(!md.includes("set -e\\n"), "no \\n escaping at depth");
+	assert.ok(md.includes("retries: 3"), "scalar siblings still rendered");
+});
+
+test("formatTurnDelta: an ERROR result with a diff keeps args + error text (untrusted diff dropped)", () => {
+	const md = renderDelta({
+		assistant: {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "7", name: "multiedit", arguments: { path: "g.py", edits: [{ oldText: "attempted needle", newText: "z" }] } },
+			],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+		// a custom/hooked edit tool that errored but still carried a diff
+		toolResults: [
+			{
+				role: "toolResult",
+				toolCallId: "7",
+				toolName: "multiedit",
+				content: [{ type: "text", text: "Error: partial apply rejected" }],
+				details: { diff: "- 1 old\n+ 1 new" },
+				isError: true,
+				timestamp: 2,
+			},
+		],
+	});
+	assert.ok(md.includes("attempted needle"), "args kept on error even when a diff exists");
+	assert.ok(md.includes("Error: partial apply rejected"), "error text shown, not replaced by the diff");
+	assert.ok(!md.includes("+ 1 new"), "untrustworthy error-result diff is not shown");
+	assert.ok(!md.includes("diff in tool result"), "no suppression header on an error result");
+});
+
+test("formatTurnDelta: feeds large content verbatim (no truncation, no markers)", () => {
+	const big = "LINE\n".repeat(5000); // ~25KB, well past every old clamp
+	const md = renderDelta({
+		userPrompt: big,
+		assistant: {
+			role: "assistant",
+			content: [{ type: "text", text: big }],
+			usage: {},
+			stopReason: "toolUse",
+			timestamp: 1,
+		},
+		toolResults: [{ role: "toolResult", toolCallId: "1", toolName: "bash", content: [{ type: "text", text: big }], isError: false, timestamp: 2 }],
+	});
+	assert.ok(!md.includes("truncated"), "nothing should be truncated");
+	assert.ok(md.includes(big), "content rides verbatim");
+});
+
+test("formatTurnDelta: marks tool errors", () => {
+	const md = renderDelta({
+		toolResults: [{ role: "toolResult", toolCallId: "1", toolName: "bash", content: [{ type: "text", text: "boom" }], isError: true, timestamp: 2 }],
+	});
+	assert.match(md, /#### Tool result: `bash` \(error\)/);
+});
+
+test("formatTurnDelta: empty turn ⇒ empty string", () => {
+	assert.equal(A.formatTurnDelta({}), "");
+});
+
+test("buildReviewMessages: header turn + one single-block user turn per delta, content verbatim", () => {
+	const d1 = A.formatTurnDelta({
+		userPrompt: "u",
+		assistant: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "bash", arguments: { command: "echo hi\nls" } }], usage: {}, stopReason: "toolUse", timestamp: 1 },
+	});
+	const d2 = A.formatTurnDelta({ assistant: { role: "assistant", content: [{ type: "text", text: "done" }], usage: {}, stopReason: "stop", timestamp: 3 } });
+	const msgs = A.buildReviewMessages("", [d1, d2]);
+	assert.equal(msgs.length, 3, "header turn + two delta turns");
+	assert.ok(msgs.every((m) => m.role === "user"), "all user turns");
+	// Each message carries EXACTLY ONE text block: section separators are explicit in
+	// the content, so model-visibility never depends on provider content-part joining.
+	assert.ok(
+		msgs.every((m) => Array.isArray(m.content) && m.content.length === 1 && m.content[0].type === "text"),
+		"every message is a single text block",
+	);
+	assert.match(msgs[0].content[0].text, /### Session update/);
+	// The explicit \n\n boundary between the #### User and #### Assistant sections must
+	// be present in the block itself (the regression the reviewer flagged).
+	assert.match(msgs[1].content[0].text, /#### User\n\nu\n\n#### Assistant/);
+	assert.ok(msgs[1].content[0].text.includes("echo hi\nls"), "command rides verbatim");
+});
+
+test("AdviseTool: records, dedups, and escalates by severity rank", async () => {
+	const calls = [];
+	const tool = new A.AdviseTool((note, severity) => calls.push({ note, severity }));
+
+	const r1 = await tool.execute("c1", { note: "guard empty array", severity: "nit" });
+	assert.equal(calls.length, 1);
+	assert.match(r1.content[0].text, /Recorded/);
+
+	// exact duplicate (same text, same severity) is dropped
+	const r2 = await tool.execute("c2", { note: "guard empty array", severity: "nit" });
+	assert.equal(calls.length, 1);
+	assert.match(r2.content[0].text, /Duplicate/);
+
+	// whitespace-normalized duplicate also dropped
+	await tool.execute("c3", { note: "guard   empty\narray", severity: "nit" });
+	assert.equal(calls.length, 1);
+
+	// escalation to a higher severity passes through
+	await tool.execute("c4", { note: "guard empty array", severity: "concern" });
+	assert.equal(calls.length, 2);
+	assert.equal(calls[1].severity, "concern");
+
+	// de-escalation back down is dropped
+	await tool.execute("c5", { note: "guard empty array", severity: "nit" });
+	assert.equal(calls.length, 2);
+
+	// reset clears memory ⇒ same note can be raised again
+	tool.resetDelivered();
+	await tool.execute("c6", { note: "guard empty array", severity: "nit" });
+	assert.equal(calls.length, 3);
+});
+
+test("AdviseTool: held notes (onAdvice→false) stay unrecorded so they can re-fire", async () => {
+	let deliver = false; // simulate "held" first, then "delivered"
+	const calls = [];
+	const tool = new A.AdviseTool((note, severity) => {
+		calls.push({ note, severity });
+		return deliver;
+	});
+
+	// first attempt held → tool reports held, dedup NOT recorded
+	const r1 = await tool.execute("h1", { note: "data race", severity: "blocker" });
+	assert.match(r1.content[0].text, /Queued for boundary/);
+	assert.equal(r1.details.held, true);
+	assert.equal(calls.length, 1);
+
+	// same note re-raised while still held → onAdvice fires AGAIN (not deduped away)
+	await tool.execute("h2", { note: "data race", severity: "blocker" });
+	assert.equal(calls.length, 2);
+
+	// now it gets delivered → recorded
+	deliver = true;
+	const r3 = await tool.execute("h3", { note: "data race", severity: "blocker" });
+	assert.match(r3.content[0].text, /Recorded/);
+	assert.equal(calls.length, 3);
+
+	// once delivered, a same-severity repeat is deduped away
+	await tool.execute("h4", { note: "data race", severity: "blocker" });
+	assert.equal(calls.length, 3);
+});
+
+test("AdviseTool: markDelivered records dedup at the real delivery point", async () => {
+	const calls = [];
+	const tool = new A.AdviseTool((note, severity) => {
+		calls.push({ note, severity });
+		return false; // always held (high-severity path)
+	});
+	// the catch-up block delivers a held note, then records it:
+	tool.markDelivered("data race", "blocker");
+	// a later same-severity re-raise is now deduped before onAdvice fires
+	const r = await tool.execute("x", { note: "data race", severity: "blocker" });
+	assert.match(r.content[0].text, /Duplicate/);
+	assert.equal(calls.length, 0);
+	// but a genuine escalation past the recorded rank still passes
+	const tool2 = new A.AdviseTool((note, severity) => {
+		calls.push({ note, severity });
+		return false;
+	});
+	tool2.markDelivered("flaky", "concern");
+	await tool2.execute("y", { note: "flaky", severity: "blocker" });
+	assert.equal(calls.length, 1);
+});
+
+// ===========================================================================
+// 1b. runtime mechanics (offline, stub agent) — always-hold + catch-up block
+//
+// The hold/reconfirm/deliver flow needs the real runtime + a controllable
+// advisor, which a live E2E can't make deterministic (the /advisor test hook
+// bypasses the runtime entirely). So we drive runTurnBlock with a stub runtime,
+// and the real AdvisorRuntime with a stub Agent.
+// ===========================================================================
+
+// --- runTurnBlock orchestration, against a stub runtime ---
+function stubRuntime({ held = [], settleResult = "settled" } = {}) {
+	return {
+		_held: [...held],
+		waited: false,
+		get hasHighPriority() {
+			return this._held.some((n) => n.severity === "concern" || n.severity === "blocker");
+		},
+		takeAllAdvice() {
+			return this._held.splice(0);
+		},
+		requeueAdvice(note, severity) {
+			this._held.push({ note, severity });
+		},
+		async waitUntilSettled() {
+			this.waited = true;
+			return settleResult;
+		},
+	};
+}
+const blockArgs = (over) => ({ consecutiveBlocks: 0, notify: () => {}, deliverHeld: () => {}, ...over });
+
+test("runTurnBlock: non-terminal with nothing held → no block, streak resets", async () => {
+	const rt = stubRuntime({ held: [] });
+	const delivered = [];
+	const n = await A.runTurnBlock(blockArgs({ terminal: false, runtime: rt, consecutiveBlocks: 3, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 0);
+	assert.equal(rt.waited, false, "must not block");
+	assert.equal(delivered.length, 0);
+});
+
+test("runTurnBlock: non-terminal with only queued nits does not block", async () => {
+	const rt = stubRuntime({ held: [{ note: "small cleanup", severity: "nit" }] });
+	assert.equal(await A.runTurnBlock(blockArgs({ terminal: false, runtime: rt })), 0);
+	assert.equal(rt.waited, false, "nits are drained by boundary flush, not catch-up blocking");
+});
+
+test("runTurnBlock: non-terminal + held + settled → delivers survivors, resets streak", async () => {
+	const delivered = [];
+	const rt = stubRuntime({ held: [{ note: "x", severity: "blocker" }], settleResult: "settled" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: false, runtime: rt, consecutiveBlocks: 2, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 0);
+	assert.deepEqual(delivered, [{ note: "x", severity: "blocker" }]);
+});
+
+test("runTurnBlock: non-terminal + held + timeout → keeps held, doubles streak", async () => {
+	const delivered = [];
+	const rt = stubRuntime({ held: [{ note: "x", severity: "blocker" }], settleResult: "timeout" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: false, runtime: rt, consecutiveBlocks: 1, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 2, "streak doubles via consecutiveBlocks+1");
+	assert.equal(delivered.length, 0);
+	assert.equal(rt.hasHighPriority, true, "held notes are kept, not taken");
+});
+
+test("runTurnBlock: terminal blocks unconditionally (even with nothing held)", async () => {
+	const rt = stubRuntime({ held: [], settleResult: "settled" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: true, runtime: rt }));
+	assert.equal(rt.waited, true, "terminal must block until the advisor settles");
+	assert.equal(n, 0);
+});
+
+test("runTurnBlock: terminal timeout → delivers held best-effort (current, not stale)", async () => {
+	const delivered = [];
+	const rt = stubRuntime({ held: [{ note: "x", severity: "concern" }], settleResult: "timeout" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: true, runtime: rt, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 0);
+	assert.deepEqual(delivered, [{ note: "x", severity: "concern" }]);
+});
+
+test("runTurnBlock: passes { terminal } through to deliverHeld (settled + timeout paths)", async () => {
+	// runTurnBlock must forward the turn's terminality to deliverHeld from both the
+	// settled and timeout paths. deliverHeld derives final-answer guidance from the
+	// turn lifecycle state and uses this value as a divergence-check invariant, so
+	// this test pins the passthrough contract, not the guidance decision.
+	const calls = [];
+	const record = (notes, opts) => calls.push({ notes, opts });
+
+	// terminal + settled → { terminal: true }
+	await A.runTurnBlock(blockArgs({ terminal: true, runtime: stubRuntime({ held: [{ note: "a" }], settleResult: "settled" }), deliverHeld: record }));
+	// non-terminal + settled → { terminal: false }
+	await A.runTurnBlock(blockArgs({ terminal: false, runtime: stubRuntime({ held: [{ note: "b", severity: "concern" }], settleResult: "settled" }), deliverHeld: record }));
+	// terminal + timeout (best-effort) → { terminal: true }
+	await A.runTurnBlock(blockArgs({ terminal: true, runtime: stubRuntime({ held: [{ note: "c", severity: "concern" }], settleResult: "timeout" }), deliverHeld: record })); // high-sev: a nit would stay held
+
+	assert.equal(calls.length, 3);
+	assert.equal(calls[0].opts?.terminal, true, "terminal settled → terminal:true");
+	assert.equal(calls[1].opts?.terminal, false, "non-terminal settled → terminal:false");
+	assert.equal(calls[2].opts?.terminal, true, "terminal timeout best-effort → terminal:true");
+});
+
+test("runTurnBlock: aborted (user Escape) → keeps held + streak, no delivery", async () => {
+	const delivered = [];
+	const rt = stubRuntime({ held: [{ note: "x", severity: "blocker" }], settleResult: "aborted" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: false, runtime: rt, consecutiveBlocks: 2, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 2, "streak preserved");
+	assert.equal(delivered.length, 0);
+	assert.equal(rt.hasHighPriority, true);
+});
+
+test("runTurnBlock: non-terminal + failed reconfirm → keeps held unconfirmed, backs off", async () => {
+	// A failed reconfirm (advisor errored out) must NOT deliver held notes as if
+	// confirmed — same handling as a timeout.
+	const delivered = [];
+	const rt = stubRuntime({ held: [{ note: "x", severity: "blocker" }], settleResult: "failed" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: false, runtime: rt, consecutiveBlocks: 1, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 2, "backoff lengthens");
+	assert.equal(delivered.length, 0, "unconfirmed held note is NOT delivered mid-run");
+	assert.equal(rt.hasHighPriority, true);
+});
+
+test("runTurnBlock: terminal + failed reconfirm → best-effort delivers", async () => {
+	const delivered = [];
+	const rt = stubRuntime({ held: [{ note: "x", severity: "concern" }], settleResult: "failed" });
+	const n = await A.runTurnBlock(blockArgs({ terminal: true, runtime: rt, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 0);
+	assert.deepEqual(delivered, [{ note: "x", severity: "concern" }], "last chance before idle → deliver best-effort");
+});
+
+test("runTurnBlock: terminal + timeout → only concerns/blockers ship best-effort; nits stay held", async () => {
+	const delivered = [];
+	const rt = stubRuntime({
+		held: [{ note: "x", severity: "concern" }, { note: "y", severity: "nit" }],
+		settleResult: "timeout",
+	});
+	const n = await A.runTurnBlock(blockArgs({ terminal: true, runtime: rt, deliverHeld: (x) => delivered.push(...x) }));
+	assert.equal(n, 0);
+	assert.deepEqual(delivered, [{ note: "x", severity: "concern" }], "only high severity is worth an unconfirmed delivery");
+	assert.deepEqual(rt._held, [{ note: "y", severity: "nit" }], "unconfirmed nit is re-held, not steered after the final answer");
+});
+
+// --- real AdvisorRuntime + stub Agent: hold → reconfirm → deliver/drop ---
+// onReview(text, {tool, rt, reviewCount}) simulates the advisor's reaction per review.
+function buildIntegration({ onReview } = {}) {
+	const delivered = [];
+	let rt;
+	let reviewCount = 0;
+	// Mirrors the extension's turnState at turn_end while the catch-up block runs.
+	const state = { turn: "ended-nonterminal" };
+	const tool = new A.AdviseTool((note, severity) => {
+		if (rt && !rt.acceptingAdvice) return false;
+		rt.enqueueAdvice(note, severity); // production callback only enqueues
+		return false;
+	});
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt(input) {
+			// Defer like a real (multi-second, network) advisor review: the hold must
+			// land AFTER push()/turn_end returns, not synchronously inside it.
+			await new Promise((r) => setTimeout(r, 0));
+			reviewCount++;
+			// prompt() now receives a batch of user messages (TextContent[] content);
+			// flatten to the verbatim wire text the model would see so onReview can
+			// assert on it (e.g. the reconfirm preamble).
+			const text =
+				typeof input === "string"
+					? input
+					: input
+							.map((m) => (Array.isArray(m.content) ? m.content.map((b) => b.text ?? "").join("\n") : m.content))
+							.join("\n\n");
+			await onReview?.(text, { tool, rt, reviewCount });
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {
+			this.state.messages = [];
+		},
+	};
+	// mirrors the extension's boundary delivery + dedup recording
+	const deliverHeld = (notes) => {
+		for (const n of notes) {
+			delivered.push({ ...n, kind: "held" });
+			tool.markDelivered(n.note, n.severity);
+		}
+	};
+	const flushNits = () => {
+		for (const n of rt.takeNits()) {
+			delivered.push({ ...n, kind: "nit", stale: true, finalAnswer: false });
+			tool.markDelivered(n.note, n.severity);
+		}
+	};
+	const onSettled = (outcome) => {
+		if (outcome !== "ok") return;
+		if (state.turn === "ended-terminal") deliverHeld(rt.takeAllAdvice());
+		else if (state.turn === "ended-nonterminal") flushNits();
+	};
+	rt = new A.AdvisorRuntime(agent, tool, 0, undefined, 80, onSettled);
+	const block = (terminal, opts = {}) => {
+		state.turn = terminal ? "ended-terminal" : "ended-nonterminal";
+		if (!terminal) flushNits();
+		return A.runTurnBlock({ terminal, runtime: rt, consecutiveBlocks: 0, notify: () => {}, deliverHeld, ...opts });
+	};
+	return { rt, tool, delivered, deliverHeld, block, getReviewCount: () => reviewCount };
+}
+
+test("integration: a nit is delivered during review, not held, never blocks", async () => {
+	const h = buildIntegration({
+		onReview: async (_t, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("n1", { note: "rename var", severity: "nit" });
+		},
+	});
+	h.rt.push("turn 1");
+	const cb = await h.block(false);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(cb, 0, "no block (nits never hold)");
+	assert.equal(h.rt.hasHighPriority, false);
+	assert.equal(h.delivered.length, 1);
+	assert.equal(h.delivered[0].kind, "nit");
+	// oracle: a mid-run inline nit is about an earlier/superseded step and carries no
+	// restate (the agent hasn't returned a final answer this turn).
+	assert.equal(h.delivered[0].stale, true, "mid-run inline nit is stale");
+	assert.equal(h.delivered[0].finalAnswer, false, "mid-run inline nit does not restate");
+});
+
+test("integration: a queued nit enters terminal reconfirmation and surviving advice restates", async () => {
+	let rt;
+	const delivered = [];
+	const tool = new A.AdviseTool((note, severity) => {
+		rt.enqueueAdvice(note, severity);
+		return false;
+	});
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt(input) {
+			const text = input.map((m) => m.content.map((b) => b.text ?? "").join("\n")).join("\n\n");
+			assert.match(text, /Held advisories/);
+			assert.match(text, /queued race/);
+			await tool.execute("reconfirm", { note: "queued race", severity: "nit" });
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {},
+	};
+	rt = new A.AdvisorRuntime(agent, tool, 0);
+	// Exact production boundary: the callback has queued a nit; terminal turn_end
+	// leaves it in the shared queue before pushing/reviewing the final delta.
+	rt.enqueueAdvice("queued race", "nit");
+	rt.push("final turn");
+	await A.runTurnBlock({
+		terminal: true,
+		runtime: rt,
+		consecutiveBlocks: 0,
+		notify: () => {},
+		deliverHeld: (notes, opts) => delivered.push({ notes, opts }),
+	});
+	assert.deepEqual(delivered, [{ notes: [{ note: "queued race", severity: "nit" }], opts: { terminal: true } }]);
+});
+
+test("integration: terminal timeout requeue does not fake reconfirmation when late review recants", async () => {
+	let release;
+	let rt;
+	const delivered = [];
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			await new Promise((resolve) => (release = resolve));
+			// Silent successful review: offered nit is recanted.
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {},
+	};
+	const tool = new A.AdviseTool((note, severity) => {
+		rt.enqueueAdvice(note, severity);
+		return false;
+	});
+	rt = new A.AdvisorRuntime(agent, tool, 0, undefined, 80, (outcome) => {
+		if (outcome === "ok") delivered.push(...rt.takeAllAdvice());
+	});
+	rt.enqueueAdvice("stale nit", "nit");
+	rt.push("final turn");
+	await A.runTurnBlock({
+		terminal: true,
+		runtime: rt,
+		consecutiveBlocks: 0,
+		capMs: 5,
+		notify: () => {},
+		deliverHeld: (notes) => delivered.push(...notes),
+	});
+	assert.deepEqual(delivered, [], "timeout does not deliver an unconfirmed nit");
+	release();
+	await rt.waitUntilSettled(2000);
+	assert.deepEqual(delivered, [], "silent late review drops the nit instead of delivering it");
+});
+
+test("integration: terminal timeout delivers a nit that the late review genuinely re-raises", async () => {
+	let release;
+	let rt;
+	let tool;
+	const delivered = [];
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			await new Promise((resolve) => (release = resolve));
+			await tool.execute("reraised", { note: "still valid", severity: "nit" });
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {},
+	};
+	tool = new A.AdviseTool((note, severity) => {
+		rt.enqueueAdvice(note, severity);
+		return false;
+	});
+	rt = new A.AdvisorRuntime(agent, tool, 0, undefined, 80, (outcome) => {
+		if (outcome === "ok") delivered.push(...rt.takeAllAdvice());
+	});
+	rt.enqueueAdvice("still valid", "nit");
+	rt.push("final turn");
+	await A.runTurnBlock({
+		terminal: true,
+		runtime: rt,
+		consecutiveBlocks: 0,
+		capMs: 5,
+		notify: () => {},
+		deliverHeld: (notes) => delivered.push(...notes),
+	});
+	assert.deepEqual(delivered, []);
+	release();
+	await rt.waitUntilSettled(2000);
+	assert.deepEqual(delivered, [{ note: "still valid", severity: "nit" }]);
+});
+
+test("integration: terminal turn — a nit from the lagging previous-turn review is held, reconfirmed by the final turn's review, then delivered", async () => {
+	const h = buildIntegration({
+		onReview: async (text, { tool, reviewCount }) => {
+			if (reviewCount === 1) {
+				// review of turn 1, emitted while the terminal turn 2 is already queued
+				await tool.execute("n1", { note: "rename var", severity: "nit" });
+			} else if (reviewCount === 2) {
+				assert.match(text, /Held advisories/, "the held nit rides the final turn's reconfirm preamble");
+				assert.match(text, /\[NIT\] rename var/);
+				await tool.execute("n2", { note: "rename var", severity: "nit" }); // still applies
+			}
+		},
+	});
+	// Review 1 lags: turn 2's delta is queued before review 1's async prompt runs.
+	h.rt.push("turn 1");
+	h.rt.push("final turn");
+	assert.equal(await h.block(true), 0);
+	assert.equal(h.getReviewCount(), 2);
+	assert.deepEqual(h.delivered, [{ note: "rename var", severity: "nit", kind: "held" }], "nit waits for the final turn's review, then lands as held");
+	assert.equal(h.rt.hasHighPriority, false);
+});
+
+test("integration: terminal turn — a lagging-review nit the final turn's review does NOT re-raise is dropped", async () => {
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("n1", { note: "rename var", severity: "nit" });
+			// review 2 (the final turn's) stays silent → the nit was addressed/superseded
+		},
+	});
+	h.rt.push("turn 1");
+	h.rt.push("final turn");
+	assert.equal(await h.block(true), 0);
+	assert.equal(h.getReviewCount(), 2);
+	assert.equal(h.delivered.length, 0, "stale previous-turn nit is dropped, not steered after the final answer");
+	assert.equal(h.rt.hasHighPriority, false);
+});
+
+test("integration: terminal turn — a nit from the final turn's OWN review lands at settle (no mid-review steer)", async () => {
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("n1", { note: "rename var", severity: "nit" });
+		},
+	});
+	h.rt.push("final turn"); // advisor idle → the review includes the final turn (current, no reconfirm needed)
+	assert.equal(await h.block(true), 0);
+	assert.equal(h.getReviewCount(), 1, "no extra reconfirm review — the nit skips the prune and waits for settle");
+	assert.deepEqual(h.delivered, [{ note: "rename var", severity: "nit", kind: "held" }]);
+	assert.equal(h.rt.hasHighPriority, false);
+});
+
+test("integration (regression): a reconfirm-as-nit followed by a provider error survives the retry (no premature dedup)", async () => {
+	// The de-escalating reconfirm (held blocker re-raised as a nit) must be
+	// reported as HELD, not recorded as delivered: if the review then errors and
+	// is retried, a recorded nit would be duplicate-dropped on the retry before it
+	// can re-reconfirm, and the successful retry's prune would silently lose the
+	// held blocker.
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) {
+				await tool.execute("a1", { note: "off-by-one", severity: "blocker" });
+			} else if (reviewCount === 2) {
+				await tool.execute("a2", { note: "off-by-one", severity: "nit" }); // de-escalating reconfirm…
+				throw new Error("provider blip"); // …then the review errors → retried
+			} else if (reviewCount === 3) {
+				await tool.execute("a3", { note: "off-by-one", severity: "nit" }); // retry must NOT be duplicate-dropped
+			}
+		},
+	});
+	h.rt.push("turn 1");
+	await h.block(false);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(h.rt.hasHighPriority, true);
+	h.rt.push("turn 2"); // NON-terminal: same-queue upsert reconfirms without de-escalating
+	assert.equal(await h.block(false), 0);
+	assert.equal(h.getReviewCount(), 3);
+	assert.equal(h.delivered.length, 1, "held blocker survives the errored reconfirm's retry");
+	assert.equal(h.delivered[0].severity, "blocker");
+});
+
+test("integration: blocker held on turn 1, survives reconfirm, delivered after terminal block", async () => {
+	const h = buildIntegration({
+		onReview: async (text, { tool, reviewCount }) => {
+			if (reviewCount === 1) {
+				await tool.execute("a1", { note: "off-by-one", severity: "blocker" });
+			} else if (reviewCount === 2) {
+				assert.match(text, /Held advisories/, "reconfirm preamble rides review 2");
+				await tool.execute("a2", { note: "off-by-one", severity: "blocker" }); // still applies
+			}
+		},
+	});
+	// turn 1: non-terminal, nothing held yet → no block; review 1 holds the blocker
+	h.rt.push("turn 1");
+	assert.equal(await h.block(false), 0);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(h.rt.hasHighPriority, true);
+	assert.equal(h.delivered.length, 0, "nothing delivered on the flagging turn");
+	// turn 2: terminal → block until settled; review 2 reconfirms; survivor delivered
+	h.rt.push("turn 2");
+	assert.equal(await h.block(true), 0);
+	assert.equal(h.getReviewCount(), 2);
+	assert.equal(h.delivered.length, 1);
+	assert.equal(h.delivered[0].kind, "held");
+	assert.equal(h.delivered[0].severity, "blocker");
+});
+
+test("integration: a blocker first raised ON the terminal turn is caught + delivered (Q1)", async () => {
+	// The advisor flags for the first time while the terminal turn is blocked; the
+	// agent did no follow-up (it's stopping), so it's delivered without a reconfirm.
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("a1", { note: "leaks an fd", severity: "blocker" });
+		},
+	});
+	h.rt.push("final turn");
+	assert.equal(await h.block(true), 0, "terminal block waits for the review that raises the blocker");
+	assert.equal(h.getReviewCount(), 1);
+	assert.equal(h.delivered.length, 1, "blocker raised on the terminal turn lands before idle");
+	assert.equal(h.delivered[0].kind, "held");
+	assert.equal(h.delivered[0].severity, "blocker");
+	assert.equal(h.rt.hasHighPriority, false);
+});
+
+test("integration (F1): advice from an orphaned review is dropped without poisoning fresh-epoch dedup", async () => {
+	const h = buildIntegration({
+		onReview: async (_t, { tool, rt, reviewCount }) => {
+			if (reviewCount === 1) {
+				rt.reset(); // orphan this review mid-flight (e.g. session compaction)
+				await tool.execute("a1", { note: "same blocker", severity: "blocker" });
+			} else if (reviewCount === 2) {
+				// Same note in the fresh epoch must reach onAdvice; the stale callback must
+				// not have been recorded as delivered by AdviseTool.
+				const result = await tool.execute("a2", { note: "same blocker", severity: "blocker" });
+				assert.doesNotMatch(result.content[0].text, /Duplicate/);
+			}
+		},
+	});
+	h.rt.push("turn 1");
+	await h.block(false);
+	await h.rt.waitUntilSettled(2000);
+	assert.equal(h.rt.hasHighPriority, false, "orphaned review's hold is dropped");
+	assert.equal(h.delivered.length, 0, "nothing delivered from a stale review");
+
+	h.rt.push("fresh turn");
+	await h.block(false);
+	await h.rt.waitUntilSettled(2000);
+	assert.equal(h.rt.hasHighPriority, true, "same blocker is accepted and held in fresh epoch");
+});
+
+test("integration (F2): a held blocker re-raised as a nit is kept, not de-escalated", async () => {
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("a1", { note: "off-by-one", severity: "blocker" });
+			else if (reviewCount === 2) await tool.execute("a2", { note: "off-by-one", severity: "nit" }); // de-escalation attempt
+		},
+	});
+	h.rt.push("turn 1");
+	await h.block(false);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(h.rt.hasHighPriority, true);
+	h.rt.push("turn 2");
+	assert.equal(await h.block(true), 0);
+	assert.equal(h.delivered.length, 1, "no nit delivered; the held note survives");
+	assert.equal(h.delivered[0].kind, "held");
+	assert.equal(h.delivered[0].severity, "blocker", "kept at blocker severity, not lowered to nit");
+});
+
+test("integration: held blocker is dropped when the reconfirm review recants", async () => {
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("a1", { note: "off-by-one", severity: "blocker" });
+			// review 2: agent fixed it → advisor stays silent → held note evaporates
+		},
+	});
+	h.rt.push("turn 1");
+	await h.block(false);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(h.rt.hasHighPriority, true);
+	h.rt.push("turn 2");
+	assert.equal(await h.block(true), 0);
+	assert.equal(h.delivered.length, 0, "recanted blocker is dropped, not delivered");
+	assert.equal(h.rt.hasHighPriority, false);
+});
+
+test("integration (regression): a held note survives push() and blocks + delivers mid-run", async () => {
+	// Regression for the synchronous-#drain-splice bug: push() runs the drain up to
+	// its first await, which must NOT empty the queue — otherwise a non-terminal
+	// turn sees hasHighPriority=false and never blocks.
+	const h = buildIntegration({
+		onReview: async (text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("a1", { note: "races on cache", severity: "blocker" });
+			else if (reviewCount === 2) {
+				assert.match(text, /Held advisories/);
+				await tool.execute("a2", { note: "races on cache", severity: "blocker" }); // still applies
+			}
+		},
+	});
+	h.rt.push("turn 1");
+	await h.block(false);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(h.rt.hasHighPriority, true);
+	// turn 2 is NON-terminal; the held note must keep hasHighPriority true across push
+	h.rt.push("turn 2");
+	assert.equal(h.rt.hasHighPriority, true, "held note survives push() (no mid-flight splice)");
+	const cb = await h.block(false);
+	assert.equal(h.delivered.length, 1, "prior queued blocker delivered at the non-terminal boundary");
+	assert.equal(h.delivered[0].kind, "held");
+	assert.equal(cb, 0, "settled → streak reset");
+});
+
+test("integration (regression): terminal timeout delivers a held note stuck mid-reconfirm", async () => {
+	// Regression for Finding 2: pre-existing advice must remain queued while
+	// its reconfirm review is in flight, so a terminal timeout can still deliver it.
+	let releaseReview2;
+	const h = buildIntegration({
+		onReview: async (_text, { tool, reviewCount }) => {
+			if (reviewCount === 1) await tool.execute("a1", { note: "fd leak", severity: "blocker" });
+			else if (reviewCount === 2) await new Promise((r) => (releaseReview2 = r)); // hang past the timeout
+		},
+	});
+	h.rt.push("turn 1");
+	await h.block(false);
+	await h.rt.waitUntilSettled(5000);
+	assert.equal(h.rt.hasHighPriority, true);
+	h.rt.push("turn 2");
+	const cb = await h.block(true, { capMs: 30 }); // terminal, review 2 hangs → times out
+	assert.equal(h.delivered.length, 1, "pre-existing held note delivered best-effort on terminal timeout");
+	assert.equal(h.delivered[0].severity, "blocker");
+	assert.equal(cb, 0);
+	releaseReview2?.(); // let the hung review finish for a clean exit
+});
+
+test("runtime.waitUntilSettled: settles on drain, times out, and aborts", async () => {
+	let resolvePrompt;
+	const agent = {
+		state: { messages: [], model: {} },
+		prompt() {
+			return new Promise((r) => {
+				resolvePrompt = r;
+			});
+		},
+		abort() {},
+		reset() {},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => true), 0);
+	rt.push("hang"); // drain starts, prompt hangs → not idle
+	assert.equal(await rt.waitUntilSettled(20), "timeout");
+	const ac = new AbortController();
+	const p = rt.waitUntilSettled(2000, ac.signal);
+	ac.abort();
+	assert.equal(await p, "aborted");
+	resolvePrompt(); // let the drain finish
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+});
+
+test("runtime.waitUntilSettled: a dropped (3x-failed) review resolves 'failed', held preserved", async () => {
+	let attempts = 0;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			throw new Error("boom");
+		},
+		abort() {},
+		reset() {},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("data race", "blocker"); // pre-existing held note
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "failed");
+	assert.equal(attempts, 3, "retried 3x then dropped");
+	assert.equal(rt.hasHighPriority, true, "held note preserved across a failed reconfirm");
+});
+
+test("runtime.waitUntilSettled: a provider error (stopReason, no throw) resolves 'failed', held preserved", async () => {
+	// The real Agent records provider failures as an assistant message with
+	// stopReason "error" rather than throwing — that must count as a failed review.
+	let attempts = 0;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "error", errorMessage: "503" });
+		},
+		abort() {},
+		reset() {},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("data race", "blocker");
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "failed");
+	assert.equal(attempts, 3, "errored review retried 3x then dropped");
+	assert.equal(rt.hasHighPriority, true, "held note NOT pruned by an errored (non-throwing) review");
+});
+
+test("runtime.waitUntilSettled: reset() cancels a pending waiter as 'aborted' immediately", async () => {
+	let resolvePrompt;
+	const agent = {
+		state: { messages: [], model: {} },
+		prompt() {
+			return new Promise((r) => (resolvePrompt = r)); // hang
+		},
+		abort() {},
+		reset() {},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => true), 0);
+	rt.push("hang");
+	const p = rt.waitUntilSettled(5000); // would hang on the in-flight prompt
+	rt.reset(); // must resolve the waiter now, not wait for the prompt/timeout
+	assert.equal(await p, "aborted");
+	resolvePrompt?.(); // let the hung prompt unwind for a clean exit
+});
+
+test("runtime.waitUntilSettled: a batch that overflows even a FRESH context self-compacts once, then resolves 'failed', held preserved", async () => {
+	// stopReason "length" triggers a one-shot reactive self-compaction (clear the
+	// advisor's own history + replay the batch fresh). If the FRESH replay still
+	// overflows, the batch genuinely doesn't fit, so it counts as a failed review
+	// (retried up to 3x). Each outer review attempt therefore issues 2 prompts
+	// (initial + one fresh-replay) = 6 total across the 3 retries.
+	let attempts = 0;
+	let resets = 0;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "length" });
+		},
+		abort() {},
+		reset() {
+			resets++;
+			this.state.messages = [];
+		},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("data race", "blocker");
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "failed");
+	assert.equal(attempts, 6, "each of the 3 review retries self-compacts once then re-overflows (2 prompts each)");
+	assert.equal(resets, 3, "one reactive self-compaction per review retry");
+	assert.equal(rt.hasHighPriority, true, "held note NOT pruned by a truncated review");
+});
+
+test("runtime.waitUntilSettled: an ACCUMULATED-context overflow self-compacts and the fresh replay succeeds", async () => {
+	// The common case: the advisor's own accumulated transcript overflowed, but the
+	// batch fits fine in a fresh context. One reactive self-compaction recovers it —
+	// the review then succeeds (settled, not failed) and recanted holds are pruned.
+	let attempts = 0;
+	let resets = 0;
+	const agent = {
+		state: { messages: [{ role: "user", content: [] }, { role: "assistant", content: [] }], model: {} },
+		async prompt() {
+			attempts++;
+			// First attempt overflows (accumulated context); after a self-compaction the
+			// fresh replay (empty messages) succeeds.
+			const overflow = this.state.messages.length > 0;
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: overflow ? "length" : "stop" });
+		},
+		abort() {},
+		reset() {
+			resets++;
+			this.state.messages = [];
+		},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("data race", "blocker"); // offered as preamble; advisor stays silent → pruned on success
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.equal(attempts, 2, "overflow then one successful fresh replay");
+	assert.equal(resets, 1, "exactly one reactive self-compaction");
+	assert.equal(rt.hasHighPriority, false, "a successful (post-compaction) review still prunes recanted holds");
+});
+
+test("runtime: a concern/blocker held by a DISCARDED overflowed attempt is rolled back, not kept (finding #1)", async () => {
+	// Attempt 1 holds a blocker, then overflows (stopReason length). The reactive
+	// self-compaction must roll that hold back: it was raised against a truncated
+	// view, and offeredKeys (snapshotted pre-attempt) can't prune it. The fresh
+	// replay re-raises only what still applies; here it stays silent, so the
+	// phantom blocker must NOT survive (else it'd later deliver as if confirmed).
+	let attempts = 0;
+	let rt;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			if (attempts === 1) {
+				rt.enqueueAdvice("phantom blocker from overflowed attempt", "blocker"); // mid-attempt hold
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "length" });
+			} else {
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" }); // silent fresh replay
+			}
+		},
+		abort() {},
+		reset() {
+			this.state.messages = [];
+		},
+	};
+	rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.equal(attempts, 2, "overflow then a successful fresh replay");
+	assert.equal(rt.hasHighPriority, false, "the phantom blocker from the discarded attempt was rolled back");
+});
+
+test("runtime: overflow rollback restores pre-existing held severity by value", async () => {
+	let attempts = 0;
+	let rt;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			if (attempts === 1) {
+				rt.enqueueAdvice("shared mutation", "blocker"); // escalation in discarded attempt
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "length" });
+			} else {
+				rt.enqueueAdvice("shared mutation", "concern"); // fresh replay confirms original rank only
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+			}
+		},
+		abort() {},
+		reset() {
+			this.state.messages = [];
+		},
+	};
+	rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("shared mutation", "concern");
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.deepEqual(rt.takeAllAdvice(), [{ note: "shared mutation", severity: "concern" }], "discarded blocker escalation must not mutate rollback snapshot");
+});
+
+test("runtime: attempt-only queued advice is rolled back after reactive overflow", async () => {
+	let attempts = 0;
+	let rt;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			if (attempts === 1) {
+				rt.enqueueAdvice("phantom nit from truncated review", "nit");
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "length" });
+			} else {
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+			}
+		},
+		abort() {},
+		reset() {
+			this.state.messages = [];
+		},
+	};
+	rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.deepEqual(rt.takeAllAdvice(), []);
+});
+
+test("runtime: overflow rollback does not resurrect advice concurrently drained at a boundary", async () => {
+	let attempts = 0;
+	let rt;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			if (attempts === 1) {
+				assert.deepEqual(rt.takeNits(), [{ note: "already delivered", severity: "nit" }]);
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "length" });
+			} else {
+				this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+			}
+		},
+		abort() {},
+		reset() {
+			this.state.messages = [];
+		},
+	};
+	rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("already delivered", "nit");
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.deepEqual(rt.takeAllAdvice(), []);
+});
+
+test("runtime: one queue dedupes, escalates, splits nits, and resets", () => {
+	const agent = { state: { messages: [], model: {} }, abort() {}, reset() {} };
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("shared mutation", "nit");
+	rt.enqueueAdvice("shared   mutation", "blocker");
+	rt.enqueueAdvice("small cleanup", "nit");
+	assert.deepEqual(rt.takeNits(), [{ note: "small cleanup", severity: "nit" }]);
+	assert.deepEqual(rt.takeAllAdvice(), [{ note: "shared mutation", severity: "blocker" }]);
+	rt.enqueueAdvice("old transcript", "nit");
+	rt.reset();
+	assert.deepEqual(rt.takeAllAdvice(), []);
+});
+
+test("runtime: the reactive rollback keeps PRE-EXISTING held notes, dropping only the discarded attempt's adds (finding #1)", async () => {
+	let attempts = 0;
+	let rt;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			attempts++;
+			if (attempts === 1) rt.enqueueAdvice("phantom from overflowed attempt", "blocker"); // only the first attempt adds it
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "length" }); // always overflows ⇒ failed, no prune
+		},
+		abort() {},
+		reset() {
+			this.state.messages = [];
+		},
+	};
+	rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("real prior blocker", "blocker"); // pre-existing, captured in the pre-batch snapshot
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "failed");
+	const held = rt.takeAllAdvice();
+	assert.equal(held.length, 1, "exactly the pre-existing held note remains");
+	assert.equal(held[0].note, "real prior blocker", "phantom dropped by rollback, prior kept");
+});
+
+test("runtime: PROACTIVE self-compaction fires at ADVISOR_COMPACT_AT, replays fresh, and preserves lifetime cost accounting", async () => {
+	const promptMsgCounts = [];
+	let resets = 0;
+	const agent = {
+		state: {
+			// One prior turn whose usage puts the advisor at 90% of a 100k window.
+			messages: [{ role: "assistant", content: [], usage: { input: 90000, cost: { total: 0.5 } }, stopReason: "stop" }],
+			model: { contextWindow: 100000 },
+		},
+		async prompt() {
+			promptMsgCounts.push(this.state.messages.length); // 0 ⇒ replayed into a fresh context
+			this.state.messages.push({ role: "assistant", content: [], usage: { input: 5, cost: { total: 0.01 } }, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {
+			resets++;
+			this.state.messages = [];
+		},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0); // default compactAt = 80
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.equal(resets, 1, "proactive self-compaction reset the agent before the review");
+	assert.equal(promptMsgCounts[0], 0, "the batch was replayed into a fresh (cleared) context");
+	const u = rt.usage;
+	assert.equal(u.input, 90005, "lifetime input survives the self-compaction (folded 90000 + fresh 5)");
+	assert.ok(Math.abs(u.cost - 0.51) < 1e-9, "lifetime cost survives the self-compaction (0.5 + 0.01)");
+	assert.equal(u.contextTokens, 5, "context size reflects only the fresh post-compaction turn");
+});
+
+test("runtime: PROACTIVE self-compaction respects a custom compactAtPercent threshold (no reset below it)", async () => {
+	let resets = 0;
+	const agent = {
+		state: {
+			messages: [{ role: "assistant", content: [], usage: { input: 60000 }, stopReason: "stop" }], // 60% of 100k
+			model: { contextWindow: 100000 },
+		},
+		async prompt() {
+			this.state.messages.push({ role: "assistant", content: [], usage: { input: 5 }, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {
+			resets++;
+			this.state.messages = [];
+		},
+	};
+	// Threshold 95 > 60% current ⇒ must NOT compact.
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0, undefined, 95);
+	rt.push("turn");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.equal(resets, 0, "context below the configured threshold is left intact");
+});
+
+test("runtime.acceptingAdvice: an in-flight review orphaned by reset() stops accepting advice", async () => {
+	let during;
+	let afterReset;
+	let rt;
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			during = rt.acceptingAdvice; // reviewEpoch === epoch
+			rt.reset(); // bumps epoch → orphans this in-flight review
+			afterReset = rt.acceptingAdvice;
+			this.state.messages.push({ role: "assistant", content: [], usage: {}, stopReason: "stop" });
+		},
+		abort() {},
+		reset() {},
+	};
+	rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0);
+	rt.push("turn");
+	await rt.waitUntilSettled(2000);
+	assert.equal(during, true, "advice accepted during a live review");
+	assert.equal(afterReset, false, "advice rejected once the review's epoch is orphaned");
+});
+
+test("runtime queue: re-raising advice at higher severity escalates it", () => {
+	const rt = new A.AdvisorRuntime({ state: { messages: [], model: {} }, async prompt() {}, abort() {}, reset() {} }, new A.AdviseTool(() => false), 0);
+	rt.enqueueAdvice("flaky test", "concern");
+	rt.enqueueAdvice("flaky   test", "blocker"); // same note (whitespace-normalized), escalated
+	const held = rt.takeAllAdvice();
+	assert.equal(held.length, 1, "deduped to one entry");
+	assert.equal(held[0].severity, "blocker", "escalation honored");
+	// de-escalation is ignored
+	rt.enqueueAdvice("x", "blocker");
+	rt.enqueueAdvice("x", "concern");
+	assert.equal(rt.takeAllAdvice()[0].severity, "blocker");
+});
+
+// ===========================================================================
+// 2. real loader
+// ===========================================================================
+
+async function loadAdvisorExtension() {
+	const runtime = createExtensionRuntime();
+	const res = await loadExtensions(["advisor.ts"], HERE, createEventBus(), runtime);
+	assert.deepEqual(res.errors, [], "extension should load without errors");
+	return res.extensions[0];
+}
+
+test("extension loads + registers /advisor command and advisory renderer", async () => {
+	const ext = await loadAdvisorExtension();
+	assert.ok(ext.commands.has("advisor"), "registers /advisor");
+	assert.ok(ext.messageRenderers.has("advisory"), "registers advisory renderer");
+});
+
+test("agent-core ordering: a steer queued during streaming is inserted after that assistant turn_end", async () => {
+	const responders = [];
+	const streamFn = () => {
+		const stream = new EventStream(
+			(event) => event.type === "done" || event.type === "error",
+			(event) => (event.type === "done" ? event.message : event.error),
+		);
+		responders.push((text) =>
+			stream.push({
+				type: "done",
+				reason: "stop",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text }],
+					api: "openai-responses",
+					provider: "mock",
+					model: "mock",
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "stop",
+					timestamp: Date.now(),
+				},
+			}),
+		);
+		return stream;
+	};
+	const agent = new CoreAgent({ streamFn });
+	const order = [];
+	agent.subscribe((event) => {
+		if (event.type === "turn_start" || event.type === "turn_end") order.push(event.type);
+		if (event.type === "message_end" && event.message.role === "assistant") order.push(`assistant:${event.message.content[0]?.text}`);
+		if (event.type === "message_end" && event.message.role === "custom") order.push("custom:advice");
+	});
+	const waitForResponders = async (count) => {
+		while (responders.length < count) await new Promise((resolve) => setTimeout(resolve, 0));
+	};
+
+	const run = agent.prompt("work");
+	await waitForResponders(1);
+	agent.steer({ role: "custom", customType: "advisory", content: "nit", display: true, timestamp: Date.now() });
+	responders[0]("final answer");
+	await waitForResponders(2);
+	responders[1]("revised answer");
+	await run;
+
+	const finalMessage = order.indexOf("assistant:final answer");
+	const finalTurnEnd = order.indexOf("turn_end", finalMessage);
+	const advice = order.indexOf("custom:advice");
+	assert.ok(finalMessage >= 0 && finalTurnEnd > finalMessage && advice > finalTurnEnd, `unexpected order: ${order.join(" → ")}`);
+});
+
+// Drive real extension handlers for the hidden no-model command seam. Production
+// callbacks use AdvisorRuntime's shared queue (covered by integration tests).
+async function lifecycleHarness() {
+	const sent = [];
+	const runtime = createExtensionRuntime();
+	runtime.sendMessage = (msg, opts) => sent.push({ content: msg.content, opts });
+	const res = await loadExtensions(["advisor.ts"], HERE, createEventBus(), runtime);
+	assert.deepEqual(res.errors, []);
+	const ext = res.extensions[0];
+	const h = (name) => {
+		const v = ext.handlers.get(name);
+		return Array.isArray(v) ? v[0] : v;
+	};
+	return {
+		sent,
+		h,
+		cmd: ext.commands.get("advisor").handler,
+		uiCtx: { ui: { notify: () => {} } },
+		turnCtx: { model: undefined, cwd: HERE },
+	};
+}
+
+async function sessionConfigHarness(initialEntries = [], picks = []) {
+	const entries = [...initialEntries];
+	const notifications = [];
+	const selections = [];
+	let allowModels = false;
+	const models = [
+		{ provider: "p1", id: "m1", reasoning: true, contextWindow: 1000 },
+		{ provider: "p2", id: "m2", reasoning: true, contextWindow: 1000 },
+	];
+	const runtime = createExtensionRuntime();
+	runtime.appendEntry = (customType, data) => entries.push({ type: "custom", customType, data });
+	runtime.sendMessage = () => {};
+	const res = await loadExtensions(["advisor.ts"], HERE, createEventBus(), runtime);
+	assert.deepEqual(res.errors, []);
+	const ext = res.extensions[0];
+	const h = (name) => { const value = ext.handlers.get(name); return Array.isArray(value) ? value[0] : value; };
+	const ctx = {
+		cwd: HERE,
+		hasUI: true,
+		model: undefined,
+		scopedModels: models.map((model) => ({ model })),
+		modelRegistry: {
+			find: (provider, id) => allowModels ? models.find((model) => model.provider === provider && model.id === id) : undefined,
+			getAvailable: () => models,
+		},
+		sessionManager: { getBranch: () => entries, getEntries: () => entries },
+		ui: {
+			notify: (message) => notifications.push(message),
+			select: async (title, options) => {
+				selections.push({ title, options });
+				return picks.shift() ?? options[0];
+			},
+		},
+	};
+	await h("session_start")({ reason: "startup" }, ctx);
+	return { entries, notifications, selections, ctx, cmd: ext.commands.get("advisor").handler, setAllowModels: (value) => { allowModels = value; } };
+}
+
+test("session defaults disabled and command changes persist as custom session entries", async () => {
+	const fresh = await sessionConfigHarness();
+	await fresh.cmd("status", fresh.ctx);
+	assert.ok(fresh.notifications.some((message) => message.includes("advisor disabled")));
+	await fresh.cmd("on", fresh.ctx);
+	assert.deepEqual(fresh.entries.at(-1), { type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: null, thinkingLevel: null } });
+	const resumed = await sessionConfigHarness(fresh.entries);
+	await resumed.cmd("status", resumed.ctx);
+	assert.ok(resumed.notifications.some((message) => message.includes("advisor enabled")));
+});
+
+test("advisor model picker uses scoped models and native thinking picker; direct form persists both", async () => {
+	const picker = await sessionConfigHarness([], ["p2/m2", "high"]);
+	picker.setAllowModels(true);
+	await picker.cmd("model", picker.ctx);
+	assert.deepEqual(picker.selections, [
+		{ title: "Advisor model", options: ["p1/m1", "p2/m2"] },
+		{ title: "Advisor thinking for p2/m2", options: ["high", "off", "minimal", "low", "medium", "xhigh", "max"] },
+	]);
+	assert.deepEqual(picker.entries.at(-1).data, { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: "high" });
+	const direct = await sessionConfigHarness();
+	direct.setAllowModels(true);
+	await direct.cmd("model p1/m1 low", direct.ctx);
+	assert.deepEqual(direct.entries.at(-1).data, { enabled: false, model: { provider: "p1", modelId: "m1" }, thinkingLevel: "low" });
+	await direct.cmd("model reset", direct.ctx);
+	assert.deepEqual(direct.entries.at(-1).data, { enabled: false, model: null, thinkingLevel: null });
+	const resumed = await sessionConfigHarness(direct.entries);
+	resumed.setAllowModels(true);
+	await resumed.cmd("model p2/m2", resumed.ctx);
+	assert.deepEqual(resumed.entries.at(-1).data, { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: null });
+});
+
+test("deferred model changes leave the busy review intact and rebuild at the safe boundary", async () => {
+	assert.ok(!process.env.ADVISOR_NO_REVIEW, "needs the real turn_end handler");
+	const models = [
+		{ provider: "p1", id: "m1", reasoning: true, contextWindow: 1000 },
+		{ provider: "p2", id: "m2", reasoning: true, contextWindow: 1000 },
+	];
+	const entries = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: { provider: "p1", modelId: "m1" } } }];
+	const streams = [];
+	const usedModels = [];
+	const notifications = [];
+	setDefaultStreamFn((model) => {
+		const stream = new EventStream(
+			(event) => event.type === "done" || event.type === "error",
+			(event) => (event.type === "done" ? event.message : event.error),
+		);
+		usedModels.push(`${model.provider}/${model.id}`);
+		streams.push(stream);
+		return stream;
+	});
+	const runtime = createExtensionRuntime();
+	runtime.appendEntry = (customType, data) => entries.push({ type: "custom", customType, data });
+	runtime.sendMessage = (message, opts) => sent.push({ message, opts });
+	const sent = [];
+	const res = await loadExtensions(["advisor.ts"], HERE, createEventBus(), runtime);
+	assert.deepEqual(res.errors, []);
+	const ext = res.extensions[0];
+	const h = (name) => { const value = ext.handlers.get(name); return Array.isArray(value) ? value[0] : value; };
+	const ctx = {
+		cwd: HERE,
+		hasUI: true,
+		model: models[0],
+		modelRegistry: {
+			find: (provider, id) => models.find((model) => model.provider === provider && model.id === id),
+			getApiKeyForProvider: () => undefined,
+		},
+		sessionManager: { getBranch: () => entries, getEntries: () => entries },
+		ui: { notify: (message) => notifications.push(message), setStatus: () => {} },
+	};
+	const waitFor = async (predicate) => {
+		const deadline = Date.now() + 2000;
+		while (!predicate()) {
+			if (Date.now() >= deadline) throw new Error("timed out waiting for advisor stream");
+			await new Promise((resolve) => setTimeout(resolve, 0));
+		}
+	};
+	const finish = (stream) => stream.push({
+		type: "done",
+		reason: "stop",
+		message: {
+			role: "assistant",
+			content: [{ type: "text", text: "silent review" }],
+			api: "openai-responses",
+			provider: "mock",
+			model: "mock",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			stopReason: "stop",
+			timestamp: Date.now(),
+		},
+	});
+	const turn = { message: { role: "assistant", content: [{ type: "text", text: "working" }, { type: "toolCall" }] }, toolResults: [] };
+	await h("session_start")({ reason: "startup" }, ctx);
+	h("turn_start")({}, ctx);
+	await h("turn_end")(turn, ctx);
+	await waitFor(() => streams.length === 1);
+	await ext.commands.get("advisor").handler("model p2/m2 low", ctx);
+	h("turn_start")({}, ctx);
+	const controller = new AbortController();
+	const changedCtx = { ...ctx, signal: controller.signal };
+	let timedOut = false;
+	const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 250);
+	await h("turn_end")(turn, changedCtx);
+	clearTimeout(timer);
+	assert.equal(timedOut, false, "a deferred model change must not wait for the old review");
+	finish(streams[0]);
+	await waitFor(() => streams.length === 2);
+	finish(streams[1]);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.deepEqual(usedModels, ["p1/m1", "p1/m1"], "the in-flight runtime was not interrupted");
+	await ext.commands.get("advisor").handler("status", ctx);
+	assert.ok(notifications.some((message) => message.includes("model p2/m2")), "the replacement applies after the busy review settles");
+});
+test("lifecycle: a direct late nit after terminal turn_end restates", async () => {
+	assert.ok(!process.env.ADVISOR_NO_REVIEW, "needs the real turn_end handler");
+	const x = await lifecycleHarness();
+	await x.h("turn_end")(
+		{ message: { role: "assistant", content: [{ type: "text", text: "final answer" }] } },
+		x.turnCtx,
+	);
+	await x.cmd("test nit parked", x.uiCtx);
+	assert.equal(x.sent.length, 1);
+	assert.match(x.sent[0].content, /self-contained final answer/);
+	assert.match(x.sent[0].content, /context="raised about an earlier step"/);
+});
+
+test("lifecycle: a direct late nit after non-terminal turn_end does not restate", async () => {
+	assert.ok(!process.env.ADVISOR_NO_REVIEW, "needs the real turn_end handler");
+	const x = await lifecycleHarness();
+	await x.h("turn_end")(
+		{ message: { role: "assistant", content: [{ type: "text", text: "working" }, { type: "toolCall" }] } },
+		x.turnCtx,
+	);
+	await x.cmd("test nit midrun", x.uiCtx);
+	assert.equal(x.sent.length, 1);
+	assert.doesNotMatch(x.sent[0].content, /self-contained final answer/);
+	assert.match(x.sent[0].content, /context="raised about an earlier step"/);
+});
+
+// ===========================================================================
+// 3. render path
+// ===========================================================================
+
+async function renderAdvisory(notes) {
+	const ext = await loadAdvisorExtension();
+	const renderer = ext.messageRenderers.get("advisory");
+	const message = {
+		role: "custom",
+		customType: "advisory",
+		content: [{ type: "text", text: "x" }],
+		display: true,
+		details: { notes },
+		timestamp: Date.now(),
+	};
+	const comp = new CustomMessageComponent(message, renderer);
+	comp.setExpanded(false);
+	return strip(comp.render(100).join("\n"));
+}
+
+test("render: advisory card shows severity tag + note text", async () => {
+	const text = await renderAdvisory([{ note: "this divides by zero on empty input", severity: "blocker" }]);
+	assert.match(text, /advisor/i);
+	assert.match(text, /BLOCKER/);
+	assert.match(text, /divides by zero/);
+});
+
+test("render: plain nit shows NIT tag", async () => {
+	const text = await renderAdvisory([{ note: "tidy this up" }]);
+	assert.match(text, /NIT/);
+	assert.match(text, /tidy this up/);
+});
+
+// ===========================================================================
+// 4. pi harness (E2E) — nit delivers immediately + triggers a turn
+//
+// Only the nit path is live-testable: the /advisor test hook runs under
+// ADVISOR_NO_REVIEW (no advisor model), so high-severity notes have no runtime
+// to hold them and no turn_end block to deliver them. The hold → reconfirm →
+// catch-up-block → deliver flow is covered deterministically by the offline
+// runtime tests above.
+// ===========================================================================
+
+class RpcPi {
+	constructor() {
+		const cwd = mkdtempSync(join(tmpdir(), "advisor-e2e-"));
+		execSync("git init -q", { cwd });
+		writeFileSync(join(cwd, "README.md"), "# test\n");
+		this.cwd = cwd;
+		this.events = [];
+		this.agentStarts = 0;
+		this.agentEnds = 0;
+		this.proc = spawn(
+			PI_BIN,
+			["--mode", "rpc", "--model", "anthropic/claude-haiku-4-5", "--session-dir", join(cwd, ".sessions")],
+			{ cwd, env: { ...process.env, ADVISOR_NO_REVIEW: "1" } },
+		);
+		this.proc.stderr.on("data", () => {});
+		let buffer = "";
+		const decoder = new StringDecoder("utf8");
+		this.proc.stdout.on("data", (chunk) => {
+			buffer += decoder.write(chunk);
+			for (;;) {
+				const i = buffer.indexOf("\n");
+				if (i === -1) break;
+				let line = buffer.slice(0, i);
+				buffer = buffer.slice(i + 1);
+				if (line.endsWith("\r")) line = line.slice(0, -1);
+				if (!line.trim()) continue;
+				let ev;
+				try {
+					ev = JSON.parse(line);
+				} catch {
+					continue;
+				}
+				this.events.push(ev);
+				if (ev.type === "agent_start") this.agentStarts++;
+				if (ev.type === "agent_end") this.agentEnds++;
+			}
+		});
+	}
+	send(cmd) {
+		this.proc.stdin.write(JSON.stringify(cmd) + "\n");
+	}
+	prompt(message) {
+		this.send({ type: "prompt", message });
+	}
+	async sleep(ms) {
+		return new Promise((r) => setTimeout(r, ms));
+	}
+	async waitFor(pred, timeoutMs, label) {
+		const t0 = Date.now();
+		while (Date.now() - t0 < timeoutMs) {
+			if (pred()) return true;
+			await this.sleep(150);
+		}
+		throw new Error(`timeout waiting for ${label}`);
+	}
+	async getMessages() {
+		const id = "gm-" + Math.random().toString(36).slice(2);
+		const before = this.events.length;
+		this.send({ id, type: "get_messages" });
+		await this.waitFor(
+			() => this.events.slice(before).some((e) => e.type === "response" && e.id === id),
+			5000,
+			"get_messages response",
+		);
+		const resp = this.events.slice(before).find((e) => e.type === "response" && e.id === id);
+		return resp?.data?.messages || [];
+	}
+	kill() {
+		try {
+			this.proc.kill("SIGTERM");
+		} catch {}
+	}
+}
+
+if (process.env.ADVISOR_E2E) {
+	test("E2E: a nit is delivered at its turn boundary, triggers a turn, and lands in transcript", async () => {
+		const pi = new RpcPi();
+		try {
+			await pi.sleep(2500);
+			const before = pi.agentStarts;
+			pi.prompt("/advisor test nit NITSENTINEL tidy this later");
+			// nits now steer + triggerTurn: an idle agent wakes to act on them.
+			await pi.waitFor(() => pi.agentStarts > before, 30000, "nit-triggered agent_start");
+			await pi.waitFor(() => pi.agentEnds >= 1, 60000, "triggered turn agent_end");
+			const adv = (await pi.getMessages()).find(
+				(m) => m.role === "custom" && m.customType === "advisory" && JSON.stringify(m).includes("NITSENTINEL"),
+			);
+			assert.ok(adv, "nit advisory lands in the transcript as an advisory custom message");
+		} finally {
+			pi.kill();
+		}
+	});
+} else {
+	test("E2E (skipped: set ADVISOR_E2E=1 to run the pi harness)", () => {});
+}
+
+// ===========================================================================
+// runner
+// ===========================================================================
+
+for (const [name, fn] of tests) {
+	try {
+		await fn();
+		passed++;
+		console.log(`  ok   ${name}`);
+	} catch (err) {
+		console.error(`  FAIL ${name}\n       ${err.message}`);
+	}
+}
+console.log(`\n${passed}/${tests.length} passed`);
+process.exit(passed === tests.length ? 0 : 1);
