@@ -33,23 +33,8 @@ append_once() {
 
 sync_pi() {
   local target="$HOME/.pi/agent"
-  [ "$(readlink -f "$target" 2>/dev/null || true)" = "$REPO_DIR/pi/agent" ] && return
-
+  rm -rf "$target"
   mkdir -p "$HOME/.pi"
-  if [ -e "$target" ]; then
-    rsync -a \
-      --exclude=.git --exclude=auth.json --exclude=ha.json --exclude='ha.json.*' \
-      --exclude=trust.json --exclude=sessions/ --exclude=git/ --exclude=node_modules/ \
-      --exclude=npm/node_modules/ --exclude=models-store.json --exclude=.advisor-state.json \
-      --exclude=pi-goal.json --exclude=package-lock.json --exclude='*.log' --exclude='*.lock' \
-      --exclude='*.pid' --exclude='*.bak' --exclude='*.bak-*' \
-      --exclude=extensions/home-assistant/config.json \
-      "$REPO_DIR/pi/agent/" "$target/"
-    rsync -a "$target/" "$REPO_DIR/pi/agent/"
-    rm -rf "$target"
-  elif [ -L "$target" ]; then
-    rm "$target"
-  fi
   ln -s "$REPO_DIR/pi/agent" "$target"
 }
 
