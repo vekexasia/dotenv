@@ -84,6 +84,13 @@ packages.)
 
 Session settings are stored in the current Pi session and restored on resume. New sessions start disabled; the old global `.advisor-state.json` file is ignored.
 
+### Workflow agents
+
+When `pi-extensible-workflows` is installed, workflow children automatically inherit the parent's enabled/model/thinking state. The integration is optional: standalone advisor loading does not require workflow support. Each run keeps its first inherited state for subsequent attempts, while terminal runs and session shutdown clear the in-process snapshot.
+
+The workflow resource policy must allow this package; the bundled workflow settings use `!**/pi-omplike-advisor/**` after a broad extension exclusion. Excluded resources are not overridden. Live handoff uses a self-contained bridge that loads the real advisor through the originating Node Pi runtime; unsupported Bun runtimes fail setup explicitly rather than silently dropping the advisor.
+
+Advisor reviews are out-of-band observer work. Their tokens and cost are excluded from workflow totals and hard budgets, and child shutdown still aborts the advisor. After a full Pi restart, a resumed run uses the restored parent-session state rather than an exact persisted launch snapshot; exact cold-replay inheritance would require workflow-core support, which this integration does not modify.
 ## Configuration
 
 ### Advisor model

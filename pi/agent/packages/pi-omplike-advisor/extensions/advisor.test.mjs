@@ -24,7 +24,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, execSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -36,7 +36,8 @@ const PI_BIN = execSync("command -v pi").toString().trim();
 // PI_DIST overrides bin-based resolution (needed when `pi` is a wrapper script
 // rather than a symlink into the install, e.g. pointing at a pi-mono checkout).
 const DIST = process.env.PI_DIST ?? dirname(execSync(`readlink -f ${PI_BIN}`).toString().trim());
-
+// The test process is not Pi, so provide the same runtime entrypoint the child bridge sees.
+process.argv[1] = join(DIST, "cli.js");
 const { createExtensionRuntime, loadExtensions } = await import(`${DIST}/core/extensions/loader.js`);
 const { createEventBus } = await import(`${DIST}/core/event-bus.js`);
 const { CustomMessageComponent } = await import(`${DIST}/modes/interactive/components/custom-message.js`);
@@ -64,7 +65,10 @@ const ALIAS = {
 };
 const jiti = createJiti(import.meta.url, { moduleCache: false, alias: ALIAS });
 const A = await jiti.import(resolve(HERE, "advisor.ts"));
-
+const WORKFLOW_CORE = (() => {
+	try { return createRequire(import.meta.url)("pi-extensible-workflows"); }
+	catch { return undefined; }
+})();
 // formatTurnDelta returns a markdown string with verbatim (un-escaped) content.
 const renderDelta = (o) => A.formatTurnDelta(o);
 
@@ -158,12 +162,50 @@ test("advisor model search fuzzily matches provider/model and model name", () =>
 
 test("advisor session state is disabled by default and isolated to the active branch", () => {
 	assert.deepEqual(A.readAdvisorSessionState([]), { enabled: false });
+	const inherited = { enabled: true, model: { provider: "p0", modelId: "m0" }, thinkingLevel: "high" };
+	assert.deepEqual(A.readAdvisorSessionState([], inherited), inherited);
 	const first = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: { provider: "p1", modelId: "m1" } } }];
 	const second = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: "low" } }];
 	assert.deepEqual(A.readAdvisorSessionState(first), { enabled: true, model: { provider: "p1", modelId: "m1" } });
 	assert.deepEqual(A.readAdvisorSessionState(second), { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: "low" });
 });
 
+test("workflow integration stays optional when pi-extensible-workflows is unavailable", () => {
+	assert.equal(A.registerAdvisorWorkflowIntegration(() => undefined), false);
+});
+test("advisor bridge resolves the installed launcher path", () => {
+	const spec = A.resolveAdvisorBridgeSpec(PI_BIN);
+	assert.ok(spec);
+	assert.equal(spec.advisorPath, resolve(HERE, "advisor.ts"));
+});
+
+test("workflow advisor bridge respects ordered extension exclusions", () => {
+	const spec = A.resolveAdvisorBridgeSpec(PI_BIN);
+	assert.ok(spec);
+	assert.equal(A.advisorResourceAllowed(["**"], spec.advisorPath), false);
+	assert.equal(A.advisorResourceAllowed(["**", "!**/pi-omplike-advisor/**"], spec.advisorPath), true);
+	assert.equal(A.advisorResourceAllowed(["**", "!**/pi-omplike-advisor/**", "**/pi-omplike-advisor/**"], spec.advisorPath), false);
+});
+
+test("workflow advisor bridge is self-contained and loads the real extension", async () => {
+	const spec = A.resolveAdvisorBridgeSpec(join(DIST, "cli.js"));
+	assert.ok(spec);
+	const factory = A.createAdvisorBridgeFactory({ enabled: true, model: { provider: "missing", modelId: "missing" }, thinkingLevel: "low" }, spec);
+	assert.ok(factory);
+	const source = Function.prototype.toString.call(factory);
+	assert.doesNotMatch(source, /installAdvisor/);
+	assert.doesNotMatch(source, /import\.meta\.url/);
+	assert.match(source, /"enabled":true/);
+	const extensionPath = join(tmpdir(), `pi-advisor-bridge-${process.pid}.mjs`);
+	writeFileSync(extensionPath, `const factories = [${source}];\nexport default async function(pi) { for (const factory of factories) await factory(pi); }\n`);
+	try {
+		const res = await loadExtensions([extensionPath], HERE, createEventBus(), createExtensionRuntime());
+		assert.deepEqual(res.errors, []);
+		assert.ok(res.extensions[0].commands.has("advisor"));
+	} finally {
+		rmSync(extensionPath, { force: true });
+	}
+});
 test("advisor runtime changes defer while a review is busy", () => {
 	assert.equal(A.advisorRuntimeChangePolicy(true, false), "defer");
 	assert.equal(A.advisorRuntimeChangePolicy(false, false), "rebuild");
@@ -1447,11 +1489,43 @@ async function loadAdvisorExtension() {
 	assert.deepEqual(res.errors, [], "extension should load without errors");
 	return res.extensions[0];
 }
-
 test("extension loads + registers /advisor command and advisory renderer", async () => {
 	const ext = await loadAdvisorExtension();
 	assert.ok(ext.commands.has("advisor"), "registers /advisor");
 	assert.ok(ext.messageRenderers.has("advisory"), "registers advisory renderer");
+});
+
+test("extension loads when pi-extensible-workflows is unavailable", async () => {
+	const standalone = mkdtempSync(join(tmpdir(), "pi-advisor-standalone-"));
+	try {
+		cpSync(resolve(HERE, "advisor.ts"), join(standalone, "advisor.ts"));
+		cpSync(resolve(HERE, "lib"), join(standalone, "lib"), { recursive: true });
+		const unavailable = join(standalone, "node_modules", "pi-extensible-workflows");
+		mkdirSync(unavailable, { recursive: true });
+		writeFileSync(join(unavailable, "package.json"), JSON.stringify({ name: "pi-extensible-workflows", main: "missing.cjs" }));
+		assert.throws(() => createRequire(join(standalone, "advisor.ts"))("pi-extensible-workflows"), { code: "MODULE_NOT_FOUND" });
+		const res = await loadExtensions(["advisor.ts"], standalone, createEventBus(), createExtensionRuntime());
+		assert.deepEqual(res.errors, []);
+		assert.ok(res.extensions[0].commands.has("advisor"));
+	} finally {
+		rmSync(standalone, { recursive: true, force: true });
+	}
+});
+
+test("workflow hook does not bypass an excluded advisor extension", async () => {
+	if (!WORKFLOW_CORE) return;
+	const entries = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: { provider: "p1", modelId: "m1" } } }];
+	const parent = await sessionConfigHarness(entries, [], undefined, "workflow-policy");
+	const hook = WORKFLOW_CORE.loadingRegistry().agentSetupHooks().find(({ name }) => name === "piOmplikeAdvisor");
+	assert.ok(hook);
+	const setup = (extensions) => ({ sessionInput: { resourcePolicy: { effective: { extensions } } } });
+	const excluded = setup(["**"]);
+	await hook.setup(excluded, { run: { sessionId: "workflow-policy", runId: "policy-excluded" } });
+	assert.equal(excluded.sessionInput.extensionFactories, undefined);
+	const allowed = setup(["**", "!**/pi-omplike-advisor/**"]);
+	await hook.setup(allowed, { run: { sessionId: "workflow-policy", runId: "policy-allowed" } });
+	assert.equal(allowed.sessionInput.extensionFactories.length, 1);
+	await parent.shutdown();
 });
 
 test("agent-core ordering: a steer queued during streaming is inserted after that assistant turn_end", async () => {
@@ -1525,8 +1599,8 @@ async function lifecycleHarness() {
 		turnCtx: { model: undefined, cwd: HERE },
 	};
 }
-
-async function sessionConfigHarness(initialEntries = [], picks = [], modelList) {
+let sessionHarnessId = 0;
+async function sessionConfigHarness(initialEntries = [], picks = [], modelList, sessionId = `advisor-session-${++sessionHarnessId}`) {
 	const entries = [...initialEntries];
 	const notifications = [];
 	const selections = [];
@@ -1552,7 +1626,7 @@ async function sessionConfigHarness(initialEntries = [], picks = [], modelList) 
 			find: (provider, id) => allowModels ? models.find((model) => model.provider === provider && model.id === id) : undefined,
 			getAvailable: () => models,
 		},
-		sessionManager: { getBranch: () => entries, getEntries: () => entries },
+		sessionManager: { getSessionId: () => sessionId, getBranch: () => entries, getEntries: () => entries },
 		ui: {
 			notify: (message) => notifications.push(message),
 			select: async (title, options) => {
@@ -1562,7 +1636,7 @@ async function sessionConfigHarness(initialEntries = [], picks = [], modelList) 
 		},
 	};
 	await h("session_start")({ reason: "startup" }, ctx);
-	return { entries, notifications, selections, ctx, cmd: ext.commands.get("advisor").handler, setAllowModels: (value) => { allowModels = value; } };
+	return { entries, notifications, selections, ctx, cmd: ext.commands.get("advisor").handler, setAllowModels: (value) => { allowModels = value; }, shutdown: () => h("session_shutdown")({}, ctx) };
 }
 
 test("session defaults disabled and command changes persist as custom session entries", async () => {
@@ -1574,6 +1648,29 @@ test("session defaults disabled and command changes persist as custom session en
 	const resumed = await sessionConfigHarness(fresh.entries);
 	await resumed.cmd("status", resumed.ctx);
 	assert.ok(resumed.notifications.some((message) => message.includes("advisor enabled")));
+});
+
+test("workflow children inherit one live parent advisor snapshot per run", async () => {
+	if (!WORKFLOW_CORE) return;
+	const entries = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: { provider: "p1", modelId: "m1" }, thinkingLevel: "low" } }];
+	const parent = await sessionConfigHarness(entries, [], undefined, "workflow-parent");
+	const hook = WORKFLOW_CORE.loadingRegistry().agentSetupHooks().find(({ name }) => name === "piOmplikeAdvisor");
+	assert.ok(hook);
+	const setup = () => ({ sessionInput: {} });
+	const first = setup();
+	await hook.setup(first, { run: { sessionId: "workflow-parent", runId: "run-1" } });
+	assert.equal(first.sessionInput.extensionFactories.length, 1);
+	await parent.cmd("off", parent.ctx);
+	const sameRun = setup();
+	await hook.setup(sameRun, { run: { sessionId: "workflow-parent", runId: "run-1" } });
+	assert.equal(sameRun.sessionInput.extensionFactories.length, 1);
+	const nextRun = setup();
+	await hook.setup(nextRun, { run: { sessionId: "workflow-parent", runId: "run-2" } });
+	assert.equal(nextRun.sessionInput.extensionFactories, undefined);
+	await parent.shutdown();
+	const afterShutdown = setup();
+	await hook.setup(afterShutdown, { run: { sessionId: "workflow-parent", runId: "run-1" } });
+	assert.equal(afterShutdown.sessionInput.extensionFactories, undefined);
 });
 
 test("RPC model picker falls back to select and preserves native thinking picker; direct form persists both", async () => {
@@ -1884,6 +1981,47 @@ if (process.env.ADVISOR_E2E) {
 	});
 } else {
 	test("E2E (skipped: set ADVISOR_E2E=1 to run the pi harness)", () => {});
+}
+if (process.env.ADVISOR_BRIDGE_E2E) {
+	test("E2E: a serialized advisor bridge loads in a real Pi child", async () => {
+		const spec = A.resolveAdvisorBridgeSpec(PI_BIN);
+		assert.ok(spec);
+		const factory = A.createAdvisorBridgeFactory({ enabled: true, model: { provider: "missing", modelId: "missing" }, thinkingLevel: "low" }, spec);
+		assert.ok(factory);
+		const root = mkdtempSync(join(tmpdir(), "advisor-bridge-child-"));
+		const bridge = join(root, "bridge.mjs");
+		writeFileSync(bridge, `const factories = [${Function.prototype.toString.call(factory)}];\nexport default async function(pi) { for (const factory of factories) await factory(pi); }\n`);
+		const child = spawn(PI_BIN, ["--mode", "rpc", "--no-extensions", "--extension", bridge, "--no-tools", "--offline", "--model", "anthropic/claude-haiku-4-5", "--session", join(root, "session.jsonl")], { cwd: root, env: { ...process.env, ADVISOR_NO_REVIEW: "1" } });
+		const events = [];
+		let buffer = "";
+		const decoder = new StringDecoder("utf8");
+		child.stdout.on("data", (chunk) => {
+			buffer += decoder.write(chunk);
+			for (;;) {
+				const end = buffer.indexOf("\n");
+				if (end < 0) break;
+				const line = buffer.slice(0, end);
+				buffer = buffer.slice(end + 1);
+				if (line.trim()) { try { events.push(JSON.parse(line)); } catch {} }
+			}
+		});
+		child.stderr.on("data", () => {});
+		const waitFor = async (predicate) => {
+			for (let index = 0; index < 80; index += 1) {
+				if (predicate()) return;
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
+			throw new Error("timed out waiting for advisor child status");
+		};
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 2500));
+			child.stdin.write(JSON.stringify({ type: "prompt", message: "/advisor status" }) + "\n");
+			await waitFor(() => events.some((event) => event.type === "extension_ui_request" && typeof event.message === "string" && event.message.includes("advisor enabled")));
+		} finally {
+			child.kill("SIGTERM");
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 }
 
 // ===========================================================================

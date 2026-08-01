@@ -45,8 +45,10 @@
  */
 
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Agent, type AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
@@ -318,6 +320,23 @@ export interface AdvisorSessionState {
 
 export const ADVISOR_STATE_TYPE = "pi-omplike-advisor-state";
 
+function copyAdvisorSessionState(state: AdvisorSessionState): AdvisorSessionState {
+	return {
+		enabled: state.enabled,
+		...(state.model ? { model: { ...state.model } } : {}),
+		...(state.thinkingLevel ? { thinkingLevel: state.thinkingLevel } : {}),
+	};
+}
+
+type WorkflowAdvisorState = {
+	sessions: Map<string, AdvisorSessionState>;
+	runs: Map<string, { sessionId: string; state: AdvisorSessionState }>;
+};
+const WORKFLOW_ADVISOR_STATE_KEY = Symbol.for("pi-omplike-advisor.workflow-state");
+const workflowAdvisorState = ((globalThis as any)[WORKFLOW_ADVISOR_STATE_KEY] ??= { sessions: new Map(), runs: new Map() }) as WorkflowAdvisorState;
+const workflowSessionStates = workflowAdvisorState.sessions;
+const workflowRunStates = workflowAdvisorState.runs;
+
 /** Parse `/advisor model provider/model [thinking]`; no args opens the picker. */
 export function parseAdvisorModelArgs(args: string): { model: AdvisorModelOverride; thinkingLevel?: AdvisorThinkingLevel } | null {
 	const fields = args.trim().split(/\s+/);
@@ -347,8 +366,8 @@ function normalizeAdvisorSessionState(data: unknown, previous: AdvisorSessionSta
 }
 
 /** Reconstruct the latest advisor state on the active session branch. */
-export function readAdvisorSessionState(entries: readonly any[]): AdvisorSessionState {
-	let state: AdvisorSessionState = { enabled: false };
+export function readAdvisorSessionState(entries: readonly any[], fallback: AdvisorSessionState = { enabled: false }): AdvisorSessionState {
+	let state = copyAdvisorSessionState(fallback);
 	for (const entry of entries) {
 		if (entry?.type === "custom" && entry.customType === ADVISOR_STATE_TYPE) state = normalizeAdvisorSessionState(entry.data, state);
 	}
@@ -1147,7 +1166,146 @@ function loadSystemPrompt(cwd: string): string {
 	return prompt;
 }
 
-export default function (pi: ExtensionAPI) {
+type WorkflowCore = { registerWorkflowExtension?: (extension: unknown) => void };
+type WorkflowUtils = { disabledResources?: (patterns: readonly string[], resources: readonly string[]) => string[] };
+export type AdvisorBridgeSpec = { advisorPath: string; jitiPath: string; aliases: Readonly<Record<string, string>> };
+type AdvisorExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
+let workflowIntegrationRegistered = false;
+
+function loadWorkflowCore(): WorkflowCore | undefined {
+	try {
+		return createRequire(import.meta.url)("pi-extensible-workflows") as WorkflowCore;
+	} catch {
+		return undefined;
+	}
+}
+
+function loadWorkflowUtils(): WorkflowUtils | undefined {
+	try {
+		return createRequire(import.meta.url)("pi-extensible-workflows/utils") as WorkflowUtils;
+	} catch {
+		return undefined;
+	}
+}
+
+function runtimePackageRoot(entrypoint: string | undefined): string | undefined {
+	if (!entrypoint) return undefined;
+	try { entrypoint = fs.realpathSync(path.resolve(entrypoint)); } catch { entrypoint = path.resolve(entrypoint); }
+	let current = path.dirname(entrypoint);
+	for (;;) {
+		if (fs.existsSync(path.join(current, "package.json")) && fs.existsSync(path.join(current, "dist", "index.js"))) return current;
+		const parent = path.dirname(current);
+		if (parent === current) return undefined;
+		current = parent;
+	}
+}
+
+function runtimeFile(root: string, relative: string): string | undefined {
+	const candidates = [
+		path.join(root, "node_modules", relative),
+		path.join(root, "..", "node_modules", relative),
+		path.join(root, "..", "..", "node_modules", relative),
+	];
+	return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+export function resolveAdvisorBridgeSpec(entrypoint = process.argv[1]): AdvisorBridgeSpec | undefined {
+	const root = runtimePackageRoot(entrypoint);
+	if (!root) return undefined;
+	const advisorPath = fileURLToPath(import.meta.url);
+	const jitiPath = runtimeFile(root, "jiti/lib/jiti.cjs");
+	const codingAgent = path.join(root, "dist", "index.js");
+	const agentCore = runtimeFile(root, "@earendil-works/pi-agent-core/dist/index.js");
+	const aiCompat = runtimeFile(root, "@earendil-works/pi-ai/dist/compat.js");
+	const piTui = runtimeFile(root, "@earendil-works/pi-tui/dist/index.js");
+	const typebox = runtimeFile(root, "typebox/build/index.mjs");
+	const typeboxCompile = runtimeFile(root, "typebox/build/compile/index.mjs");
+	const typeboxValue = runtimeFile(root, "typebox/build/value/index.mjs");
+	if (!jitiPath || !fs.existsSync(codingAgent) || !agentCore || !aiCompat || !piTui || !typebox || !typeboxCompile || !typeboxValue) return undefined;
+	const aliases: Record<string, string> = {
+		"@earendil-works/pi-coding-agent": codingAgent,
+		"@earendil-works/pi-agent-core": agentCore,
+		"@earendil-works/pi-ai": aiCompat,
+		"@earendil-works/pi-ai/compat": aiCompat,
+		"@earendil-works/pi-tui": piTui,
+		typebox,
+		"typebox/compile": typeboxCompile,
+		"typebox/value": typeboxValue,
+		"@mariozechner/pi-coding-agent": codingAgent,
+		"@mariozechner/pi-agent-core": agentCore,
+		"@mariozechner/pi-ai": aiCompat,
+		"@mariozechner/pi-tui": piTui,
+		"@sinclair/typebox": typebox,
+		"@sinclair/typebox/compile": typeboxCompile,
+		"@sinclair/typebox/value": typeboxValue,
+	};
+	return { advisorPath, jitiPath, aliases };
+}
+export function advisorResourceAllowed(patterns: readonly string[], advisorPath = fileURLToPath(import.meta.url)): boolean {
+	if (!patterns.length) return true;
+	const disabledResources = loadWorkflowUtils()?.disabledResources;
+	if (typeof disabledResources !== "function") return false;
+	return disabledResources(patterns, [advisorPath]).length === 0;
+}
+
+export function createAdvisorBridgeFactory(state: AdvisorSessionState, spec = resolveAdvisorBridgeSpec()): AdvisorExtensionFactory | undefined {
+	if (!spec) return undefined;
+	const source = `return async function piOmplikeAdvisorBridge(pi) {\n` +
+		`const module = await import(${JSON.stringify(pathToFileURL(spec.jitiPath).href)});\n` +
+		`const createJiti = module.default ?? module.createJiti;\n` +
+		`if (typeof createJiti !== "function") throw new Error("Pi runtime jiti is unavailable");\n` +
+		`const jiti = createJiti(${JSON.stringify(spec.advisorPath)}, { moduleCache: false, alias: ${JSON.stringify(spec.aliases)} });\n` +
+		`const extension = await jiti.import(${JSON.stringify(spec.advisorPath)}, { default: true });\n` +
+		`if (typeof extension !== "function") throw new Error("Advisor extension has no default factory");\n` +
+		`await extension(pi, ${JSON.stringify(copyAdvisorSessionState(state))});\n` +
+		`};`;
+	return new Function(source)() as AdvisorExtensionFactory;
+}
+
+export function registerAdvisorWorkflowIntegration(load: () => WorkflowCore | undefined = loadWorkflowCore): boolean {
+	if (workflowIntegrationRegistered) return true;
+	const core = load();
+	if (typeof core?.registerWorkflowExtension !== "function") return false;
+	try {
+		core.registerWorkflowExtension({
+			version: "0.1.0",
+			headline: "Inherited workflow advisor",
+			agentSetupHooks: {
+				piOmplikeAdvisor: {
+					setup(agent: any, context: any) {
+						const sessionId = context.run.sessionId as string;
+						const runId = context.run.runId as string;
+						let inherited = workflowRunStates.get(runId)?.state;
+						if (!inherited) {
+							inherited = copyAdvisorSessionState(workflowSessionStates.get(sessionId) ?? { enabled: false });
+							workflowRunStates.set(runId, { sessionId, state: inherited });
+						}
+						if (!inherited.enabled) return;
+						const spec = resolveAdvisorBridgeSpec();
+						if (!spec) throw new Error("Advisor workflow bridge requires the originating Node Pi runtime");
+						if (!advisorResourceAllowed(agent.sessionInput.resourcePolicy?.effective?.extensions ?? [], spec.advisorPath)) return;
+						const factory = createAdvisorBridgeFactory(inherited, spec);
+						if (!factory) return;
+						agent.sessionInput.extensionFactories ??= [];
+						agent.sessionInput.extensionFactories.push(factory);
+					},
+				},
+			},
+		});
+		workflowIntegrationRegistered = true;
+		return true;
+	} catch (error) {
+		const code = (error as { code?: string }).code;
+		if (code === "DUPLICATE_NAME") {
+			workflowIntegrationRegistered = true;
+			return true;
+		}
+		if (code === "REGISTRY_FROZEN") return false;
+		throw error;
+	}
+}
+
+function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionState = { enabled: false }): void {
 	let sessionState: AdvisorSessionState = { enabled: false };
 	let enabled = false;
 	let runtime: AdvisorRuntime | undefined;
@@ -1159,12 +1317,9 @@ export default function (pi: ExtensionAPI) {
 	let turnConfig: AdvisorSessionState = { enabled: false };
 	let carriedAdvice: AdvisorNote[] = [];
 	let warnedUnavailableModelKey: string | undefined;
+	let activeSessionId: string | undefined;
 
-	const copyState = (state: AdvisorSessionState): AdvisorSessionState => ({
-		enabled: state.enabled,
-		...(state.model ? { model: { ...state.model } } : {}),
-		...(state.thinkingLevel ? { thinkingLevel: state.thinkingLevel } : {}),
-	});
+	const copyState = copyAdvisorSessionState;
 	const configKey = (state: AdvisorSessionState): string => JSON.stringify({ model: state.model, thinkingLevel: state.thinkingLevel });
 
 	function persistState(): void {
@@ -1179,16 +1334,19 @@ export default function (pi: ExtensionAPI) {
 		const configChanged = configKey(next) !== configKey(sessionState);
 		sessionState = copyState(next);
 		enabled = sessionState.enabled;
+		if (activeSessionId) workflowSessionStates.set(activeSessionId, copyState(sessionState));
 		if (configChanged) pendingRuntimeRebuild = true;
 		if (persist) persistState();
 	}
 
 	function restoreSessionState(ctx: any): void {
-		sessionState = readAdvisorSessionState(ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries());
+		activeSessionId = String(ctx.sessionManager.getSessionId?.() ?? "");
+		sessionState = readAdvisorSessionState(ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries(), inheritedState);
 		enabled = sessionState.enabled;
 		turnConfig = copyState(sessionState);
 		pendingRuntimeRebuild = false;
 		carriedAdvice = [];
+		if (activeSessionId) workflowSessionStates.set(activeSessionId, copyState(sessionState));
 	}
 
 	// Lazily-built advisor state, rebuilt when cwd/model changes or session resets.
@@ -1550,9 +1708,17 @@ export default function (pi: ExtensionAPI) {
 	// Tool-path handoff replaces the transcript without a session_start event
 	// (low-level sessionManager.newSession()), so reset off this explicit signal.
 	pi.events.on(HANDOFF_SESSION_REPLACED_CHANNEL, () => resetAdvisorState());
+	pi.events.on("workflow:run-state-changed", (event: any) => {
+		if (["completed", "failed", "stopped"].includes(event?.state)) workflowRunStates.delete(event.runId);
+	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
 		teardown();
+		if (activeSessionId) {
+			workflowSessionStates.delete(activeSessionId);
+			for (const [runId, value] of workflowRunStates) if (value.sessionId === activeSessionId) workflowRunStates.delete(runId);
+			activeSessionId = undefined;
+		}
 		(ctx as { ui?: { setStatus?: (k: string, t: string | undefined) => void } }).ui?.setStatus?.(STATUS_KEY, undefined);
 	});
 
@@ -1695,4 +1861,9 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify("usage: /advisor [on|off|status|model]", "warning");
 		},
 	});
+}
+
+export default function advisorExtension(pi: ExtensionAPI, inheritedState: AdvisorSessionState = { enabled: false }): void {
+	registerAdvisorWorkflowIntegration();
+	installAdvisor(pi, inheritedState);
 }

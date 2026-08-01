@@ -21,7 +21,8 @@
       "!**/pi-anthropic-oauth/**",
       "!**/pi-codex-image/**",
       "!**/pi-hashline-edit-pro/**",
-      "!**/@sting8k/pi-vcc/**"
+      "!**/@sting8k/pi-vcc/**",
+      "!**/pi-omplike-advisor/**"
     ]
   },
   "extensions": {
