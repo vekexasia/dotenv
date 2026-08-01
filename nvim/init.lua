@@ -1,6 +1,6 @@
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
-if os.getenv("SSH_CLIENT") ~= nil or os.getenv("SSH_TTY") ~= nil then
+if os.getenv("SSH_CLIENT") ~= nil or os.getenv("SSH_TTY") ~= nil or os.getenv("WSL_DISTRO_NAME") ~= nil then
 	local function my_paste(_)
 		return function(_)
 			local content = vim.fn.getreg('"')
@@ -36,6 +36,7 @@ vim.opt.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.opt.mouse = "a"
+vim.opt.guicursor = "n-v-c-sm:block,i-ci-ve:ver25,r-cr-o:hor20"
 
 -- Don't show the mode, since it's already in the status line
 vim.opt.showmode = false

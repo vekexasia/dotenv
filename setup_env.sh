@@ -88,6 +88,7 @@ fi
 
 mkdir -p "$HOME/.config"
 rsync -a --delete --exclude=node_modules/ "$REPO_DIR/nvim/" "$HOME/.config/nvim/"
+install -Dm644 "$REPO_DIR/herdr/config.toml" "$HOME/.config/herdr/config.toml"
 install -Dm644 "$REPO_DIR/.tmux.conf" "$HOME/.tmux.conf"
 
 if [ "$IS_WSL" -eq 1 ]; then

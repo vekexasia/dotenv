@@ -9,8 +9,8 @@ git clone https://github.com/vekexasia/dotenv.git ~/git/personale/dotenv
 ~/git/personale/dotenv/setup_env.sh
 ```
 
-Managed: Neovim, tmux, WezTerm (WSL), clipboard helpers, Pi, and shell additions. Pi configuration is linked from this checkout; existing credentials and runtime state are migrated into it.
+Managed: Neovim, tmux, WezTerm (WSL), Herdr configuration, clipboard helpers, Pi, and shell additions. Pi configuration is linked from this checkout; existing credentials and runtime state are migrated into it.
 
 `gh` and `glab` are installed but still require `gh auth login` and `glab auth login`.
 
-Herdr itself is not installed, but its Pi integration is refreshed when Herdr is present.
+Herdr itself is not installed. Its configuration is managed, and Pi integration is refreshed when Herdr is present.
