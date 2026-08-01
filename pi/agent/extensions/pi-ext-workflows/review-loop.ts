@@ -77,8 +77,6 @@ export const reviewLoopOutputSchema = developUntilApproved.output;
 const extension: WorkflowExtension = {
   version: "1.0.0",
   headline: "Developer-review loop",
-  description:
-    "Runs developer and reviewer agents in a loop until review passes.",
   functions: { developUntilApproved },
 };
 

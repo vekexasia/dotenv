@@ -16,6 +16,7 @@
   "files": [
     "extensions/advisor.ts",
     "extensions/lib/",
+    "README.md"
   ],
   "pi": {
     "extensions": [

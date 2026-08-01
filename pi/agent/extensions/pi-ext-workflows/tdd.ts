@@ -66,7 +66,6 @@ The test command is \`{testCmd}\` and the task is <task>{task}</task>`,
 const extension: WorkflowExtension = {
   version: "1.0.0",
   headline: "TDD development",
-  description: "Develops something using TDD",
   functions: { tddDev },
 };
 

@@ -61,7 +61,6 @@ export type IssueDetail = Static<
 const extension: WorkflowExtension = {
   version: "1.0.0",
   headline: "Fetch issue details",
-  description: "Fetches GitHub or GitLab issue details for other workflows.",
   functions: { fetchIssueDetails },
 };
 

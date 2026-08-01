@@ -50,9 +50,9 @@ import * as path from "node:path";
 
 import { Agent, type AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Model, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Container, fuzzyFilter, getKeybindings, Input, SelectList, Text, type TUI } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 import { loadModeSpec } from "./lib/mode-utils.js";
@@ -215,6 +215,95 @@ export function parseAdvisorTestArgs(args: string): { severity: AdvisorSeverity;
 
 export type AdvisorThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export const ADVISOR_THINKING_LEVELS: AdvisorThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+export interface AdvisorModelSearchItem {
+	provider: string;
+	id: string;
+	name?: string;
+}
+
+export function filterAdvisorModels<T extends AdvisorModelSearchItem>(models: readonly T[], query: string): T[] {
+	return fuzzyFilter([...models], query, (model) => `${model.provider}/${model.id} ${model.name ?? ""}`);
+}
+
+interface AdvisorModelPickerItem extends AdvisorModelSearchItem {
+	label: string;
+}
+
+const ADVISOR_MODEL_PICKER_MAX_ROWS = 8;
+
+class AdvisorModelPicker extends Container {
+	private readonly searchInput = new Input();
+	private readonly listContainer = new Container();
+	private readonly tui: TUI;
+	private readonly theme: Theme;
+	private readonly items: readonly AdvisorModelPickerItem[];
+	private readonly done: (value: string | undefined) => void;
+	private list!: SelectList;
+	private closed = false;
+	private _focused = false;
+
+	get focused(): boolean {
+		return this._focused;
+	}
+
+	set focused(value: boolean) {
+		this._focused = value;
+		this.searchInput.focused = value;
+	}
+
+	constructor(items: readonly AdvisorModelPickerItem[], tui: TUI, theme: Theme, done: (value: string | undefined) => void) {
+		super();
+		this.items = items;
+		this.tui = tui;
+		this.theme = theme;
+		this.done = done;
+		this.addChild(new Text(theme.fg("accent", "Advisor model"), 1, 0));
+		this.addChild(this.searchInput);
+		this.addChild(this.listContainer);
+		this.addChild(new Text(theme.fg("dim", "up/down move | Enter select | Esc cancel"), 1, 0));
+		this.searchInput.onSubmit = () => this.finish(this.list.getSelectedItem()?.value);
+		this.searchInput.onEscape = () => this.finish(undefined);
+		this.refreshList();
+	}
+
+	handleInput(data: string): void {
+		const keybindings = getKeybindings();
+		if (keybindings.matches(data, "tui.select.up") || keybindings.matches(data, "tui.select.down")) {
+			this.list.handleInput(data);
+			this.tui.requestRender();
+			return;
+		}
+		const previousValue = this.searchInput.getValue();
+		this.searchInput.handleInput(data);
+		if (this.searchInput.getValue() !== previousValue) this.refreshList();
+	}
+
+	private refreshList(): void {
+		const filtered = filterAdvisorModels(this.items, this.searchInput.getValue());
+		const listItems = filtered.map((item) => ({
+			value: item.label,
+			label: item.label,
+			...(item.name ? { description: item.name } : {}),
+		}));
+		this.list = new SelectList(listItems, Math.min(ADVISOR_MODEL_PICKER_MAX_ROWS, Math.max(1, listItems.length)), {
+			selectedPrefix: (text) => this.theme.fg("accent", text),
+			selectedText: (text) => this.theme.fg("accent", text),
+			description: (text) => this.theme.fg("muted", text),
+			scrollInfo: (text) => this.theme.fg("dim", text),
+			noMatch: (text) => this.theme.fg("warning", text),
+		});
+		this.listContainer.clear();
+		this.listContainer.addChild(this.list);
+		this.tui.requestRender();
+	}
+
+	private finish(value: string | undefined): void {
+		if (this.closed) return;
+		this.closed = true;
+		this.done(value);
+	}
+}
 
 export interface AdvisorModelOverride {
 	provider: string;
@@ -1531,7 +1620,10 @@ export default function (pi: ExtensionAPI) {
 				}
 				let selected: { provider: string; modelId: string; thinkingLevel?: AdvisorThinkingLevel } | undefined;
 				if (arg === "model") {
-					if (!(ctx as any).hasUI || !(ctx.ui as any).select) {
+					const ui = ctx.ui;
+					const canCustom = ctx.mode === "tui" && typeof (ui as any).custom === "function";
+					const canSelect = typeof ui.select === "function";
+					if (!(ctx as any).hasUI || (!canCustom && !canSelect)) {
 						ctx.ui.notify("advisor model picker requires interactive UI", "warning");
 						return;
 					}
@@ -1541,10 +1633,20 @@ export default function (pi: ExtensionAPI) {
 						ctx.ui.notify("no advisor models are available", "warning");
 						return;
 					}
-					const labels = entries.map((entry: any) => `${entry.model.provider}/${entry.model.id}`);
 					const currentLabel = sessionState.model ? `${sessionState.model.provider}/${sessionState.model.modelId}` : activeModelLabel;
-					const ordered = currentLabel && labels.includes(currentLabel) ? [currentLabel, ...labels.filter((label: string) => label !== currentLabel)] : labels;
-					const modelLabel = await (ctx.ui as any).select("Advisor model", ordered);
+					const currentEntry = entries.find((entry: any) => `${entry.model.provider}/${entry.model.id}` === currentLabel);
+					const orderedEntries = currentEntry ? [currentEntry, ...entries.filter((entry: any) => entry !== currentEntry)] : entries;
+					const pickerItems = orderedEntries.map((entry: any) => ({
+						provider: entry.model.provider,
+						id: entry.model.id,
+						name: typeof entry.model.name === "string" ? entry.model.name : undefined,
+						label: `${entry.model.provider}/${entry.model.id}`,
+					}));
+					const modelLabel = canCustom
+						? await ui.custom<string | undefined>((tui: TUI, theme: Theme, _keybindings: unknown, done: (value: string | undefined) => void) =>
+							new AdvisorModelPicker(pickerItems, tui, theme, done),
+						)
+						: await ui.select("Advisor model", pickerItems.map((item: AdvisorModelPickerItem) => item.label));
 					if (!modelLabel) return;
 					const entry = entries.find((item: any) => `${item.model.provider}/${item.model.id}` === modelLabel);
 					if (!entry) return;

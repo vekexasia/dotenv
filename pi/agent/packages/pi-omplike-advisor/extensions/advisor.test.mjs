@@ -145,6 +145,17 @@ test("advisor model configuration parses provider/model and thinking level", () 
 	assert.equal(A.parseAdvisorModelArgs("model p/m invalid"), null);
 });
 
+test("advisor model search fuzzily matches provider/model and model name", () => {
+	const models = [
+		{ provider: "openrouter", id: "anthropic/claude-3.7-sonnet", name: "Claude Sonnet" },
+		{ provider: "openai", id: "gpt-5.6", name: "Velvet Horizon" },
+		{ provider: "google", id: "gemini-2.5-pro", name: "Gemini Pro" },
+	];
+	assert.deepEqual(A.filterAdvisorModels(models, "ortr cld").map((model) => model.id), ["anthropic/claude-3.7-sonnet"]);
+	assert.deepEqual(A.filterAdvisorModels(models, "vh").map((model) => model.id), ["gpt-5.6"]);
+	assert.deepEqual(A.filterAdvisorModels(models, "g25").map((model) => model.id), ["gemini-2.5-pro"]);
+});
+
 test("advisor session state is disabled by default and isolated to the active branch", () => {
 	assert.deepEqual(A.readAdvisorSessionState([]), { enabled: false });
 	const first = [{ type: "custom", customType: A.ADVISOR_STATE_TYPE, data: { enabled: true, model: { provider: "p1", modelId: "m1" } } }];
@@ -1515,12 +1526,12 @@ async function lifecycleHarness() {
 	};
 }
 
-async function sessionConfigHarness(initialEntries = [], picks = []) {
+async function sessionConfigHarness(initialEntries = [], picks = [], modelList) {
 	const entries = [...initialEntries];
 	const notifications = [];
 	const selections = [];
 	let allowModels = false;
-	const models = [
+	const models = modelList ?? [
 		{ provider: "p1", id: "m1", reasoning: true, contextWindow: 1000 },
 		{ provider: "p2", id: "m2", reasoning: true, contextWindow: 1000 },
 	];
@@ -1533,6 +1544,7 @@ async function sessionConfigHarness(initialEntries = [], picks = []) {
 	const h = (name) => { const value = ext.handlers.get(name); return Array.isArray(value) ? value[0] : value; };
 	const ctx = {
 		cwd: HERE,
+		mode: "rpc",
 		hasUI: true,
 		model: undefined,
 		scopedModels: models.map((model) => ({ model })),
@@ -1564,7 +1576,7 @@ test("session defaults disabled and command changes persist as custom session en
 	assert.ok(resumed.notifications.some((message) => message.includes("advisor enabled")));
 });
 
-test("advisor model picker uses scoped models and native thinking picker; direct form persists both", async () => {
+test("RPC model picker falls back to select and preserves native thinking picker; direct form persists both", async () => {
 	const picker = await sessionConfigHarness([], ["p2/m2", "high"]);
 	picker.setAllowModels(true);
 	await picker.cmd("model", picker.ctx);
@@ -1583,6 +1595,49 @@ test("advisor model picker uses scoped models and native thinking picker; direct
 	resumed.setAllowModels(true);
 	await resumed.cmd("model p2/m2", resumed.ctx);
 	assert.deepEqual(resumed.entries.at(-1).data, { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: null });
+});
+
+test("TUI model picker uses compact custom UI and still opens thinking picker", async () => {
+	const compactModels = [
+		{ provider: "p1", id: "m1", reasoning: true, contextWindow: 1000 },
+		{ provider: "p2", id: "m2", reasoning: true, contextWindow: 1000 },
+		...Array.from({ length: 10 }, (_, index) => ({ provider: "extra", id: `m${index + 1}`, reasoning: true, contextWindow: 1000 })),
+	];
+	assert.ok(compactModels.length > 8);
+	const picker = await sessionConfigHarness([], ["high"], compactModels);
+	picker.setAllowModels(true);
+	picker.ctx.mode = "tui";
+	let customCalls = 0;
+	picker.ctx.ui.custom = async (factory) => {
+		customCalls++;
+		let result;
+		const view = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, (value) => { result = value; });
+		assert.ok(view.render(80).length <= 12, "model picker should stay compact");
+		view.handleInput("p2");
+		view.handleInput("\n");
+		return result;
+	};
+	await picker.cmd("model", picker.ctx);
+	assert.equal(customCalls, 1);
+	assert.deepEqual(picker.selections, [
+		{ title: "Advisor thinking for p2/m2", options: ["high", "off", "minimal", "low", "medium", "xhigh", "max"] },
+	]);
+	assert.deepEqual(picker.entries.at(-1).data, { enabled: false, model: { provider: "p2", modelId: "m2" }, thinkingLevel: "high" });
+});
+
+test("TUI model picker Escape cancels without persisting a session model entry", async () => {
+	const picker = await sessionConfigHarness();
+	picker.setAllowModels(true);
+	picker.ctx.mode = "tui";
+	picker.ctx.ui.custom = async (factory) => {
+		let result = "not-cancelled";
+		const view = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, (value) => { result = value; });
+		view.handleInput("\x1b");
+		assert.equal(result, undefined);
+		return result;
+	};
+	await picker.cmd("model", picker.ctx);
+	assert.deepEqual(picker.entries, []);
 });
 
 test("deferred model changes leave the busy review intact and rebuild at the safe boundary", async () => {

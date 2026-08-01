@@ -92,8 +92,6 @@ export const seqIssuesOutputSchema = devIssuesInBatches.output;
 const extension: WorkflowExtension = {
   version: "1.0.0",
   headline: "Batch issue development",
-  description:
-    "Fetches issue details, identifies dependencies, and develops dependency batches sequentially.",
   functions: { devIssuesInBatches },
 };
 

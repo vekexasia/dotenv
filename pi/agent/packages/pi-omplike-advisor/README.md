@@ -78,7 +78,7 @@ packages.)
   model it is using.
 - `/advisor on` — enable the advisor for this Pi session.
 - `/advisor off` — disable the advisor for this Pi session.
-- `/advisor model` — choose an advisor model and thinking level with Pi's native pickers.
+- `/advisor model` — choose an advisor model with a compact searchable picker, then choose its thinking level.
 - `/advisor model provider/model [thinking]` — configure the advisor directly.
 - `/advisor model default` or `/advisor model reset` — clear the session override.
 
