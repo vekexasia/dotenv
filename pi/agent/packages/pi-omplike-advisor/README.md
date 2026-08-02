@@ -114,10 +114,10 @@ Session model and thinking overrides are persisted in custom session entries, no
 
 ### System prompt
 
-The advisor ships with a built-in default system prompt (a string constant in
-`extensions/advisor.ts`). To override it, drop your own
-`~/.pi/agent/system-prompts/advisor.md` — if present, it replaces the bundled
-default wholesale.
+The advisor system prompt is kept outside the extension at
+`~/.pi/agent/advisor-system.md` and loaded as plain Markdown text.
+Edit that file to change the advisor's role, review priorities, or communication
+rules.
 
 ### Project guidance (`WATCHDOG.md`)
 

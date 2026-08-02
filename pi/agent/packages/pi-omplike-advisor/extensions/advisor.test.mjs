@@ -1496,10 +1496,13 @@ test("extension loads + registers /advisor command and advisory renderer", async
 });
 
 test("extension loads when pi-extensible-workflows is unavailable", async () => {
-	const standalone = mkdtempSync(join(tmpdir(), "pi-advisor-standalone-"));
+	const root = mkdtempSync(join(tmpdir(), "pi-advisor-standalone-"));
+	const standalone = join(root, "packages", "pi-omplike-advisor", "extensions");
 	try {
+		mkdirSync(standalone, { recursive: true });
 		cpSync(resolve(HERE, "advisor.ts"), join(standalone, "advisor.ts"));
 		cpSync(resolve(HERE, "lib"), join(standalone, "lib"), { recursive: true });
+		cpSync(resolve(HERE, "../../../advisor-system.md"), join(root, "advisor-system.md"));
 		const unavailable = join(standalone, "node_modules", "pi-extensible-workflows");
 		mkdirSync(unavailable, { recursive: true });
 		writeFileSync(join(unavailable, "package.json"), JSON.stringify({ name: "pi-extensible-workflows", main: "missing.cjs" }));
@@ -1508,7 +1511,7 @@ test("extension loads when pi-extensible-workflows is unavailable", async () => 
 		assert.deepEqual(res.errors, []);
 		assert.ok(res.extensions[0].commands.has("advisor"));
 	} finally {
-		rmSync(standalone, { recursive: true, force: true });
+		rmSync(root, { recursive: true, force: true });
 	}
 });
 

@@ -1,6 +1,7 @@
 # Public repo: ignore everything unless explicitly allowed below.
 /*
 !/.gitignore
+!/advisor-system.md
 !/pi-extensible-workflows
 !/.pii-allowlist
 !/AGENTS.md
