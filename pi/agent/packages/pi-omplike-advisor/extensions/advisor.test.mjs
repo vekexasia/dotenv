@@ -323,6 +323,30 @@ test("formatTurnDelta: edits render as compact header + result diff (no raw old/
 	assert.ok(!md.includes("Successfully replaced"));
 });
 
+test("formatTurnDelta: a successful generic diff suppresses mutation payload", () => {
+const md = renderDelta({
+assistant: {
+role: "assistant",
+content: [{ type: "toolCall", id: "replace-1", name: "replace", arguments: { path: "file.ts", content_lines: ["new line"] } }],
+usage: {},
+stopReason: "toolUse",
+timestamp: 1,
+},
+toolResults: [{
+role: "toolResult",
+toolCallId: "replace-1",
+toolName: "replace",
+content: [{ type: "text", text: "replaced" }],
+details: { diff: "- old\n+ new" },
+isError: false,
+timestamp: 2,
+}],
+});
+assert.match(md, /tool `replace`\(file\.ts\); diff in tool result/);
+assert.doesNotMatch(md, /content_lines/);
+assert.match(md, /\+ new/);
+});
+
 test("formatTurnDelta: a failed edit (no diff) keeps its attempted args for diagnosis", () => {
 	const md = renderDelta({
 		assistant: {
@@ -746,6 +770,24 @@ function buildIntegration({ onReview } = {}) {
 	return { rt, tool, delivered, deliverHeld, block, getReviewCount: () => reviewCount };
 }
 
+test("runtime review observer sees each advisor prompt", async () => {
+	const events = [];
+	const agent = {
+		state: { messages: [], model: {} },
+		async prompt() {
+			this.state.messages.push({ role: "assistant", content: [], stopReason: "stop" });
+		},
+		abort() {},
+		reset() {},
+	};
+	const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => false), 0, undefined, 80, undefined, (event) => events.push(event));
+	rt.push("review");
+	assert.equal(await rt.waitUntilSettled(2000), "settled");
+	assert.deepEqual(events.map(({ phase, outcome }) => [phase, outcome]), [["started", undefined], ["finished", "ok"]]);
+	assert.equal(events[0].reviewNumber, events[1].reviewNumber);
+	assert.equal(events[0].batchTurns, 1);
+});
+
 test("integration: a nit is delivered during review, not held, never blocks", async () => {
 	const h = buildIntegration({
 		onReview: async (_t, { tool, reviewCount }) => {
@@ -1126,6 +1168,50 @@ test("runtime.waitUntilSettled: settles on drain, times out, and aborts", async 
 	assert.equal(await p, "aborted");
 	resolvePrompt(); // let the drain finish
 	assert.equal(await rt.waitUntilSettled(2000), "settled");
+});
+
+test("runtime.waitUntilSettled: an already-aborted idle signal stays aborted", async () => {
+const agent = { state: { messages: [], model: {} }, abort() {}, reset() {} };
+const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => true), 0);
+const ac = new AbortController();
+ac.abort();
+assert.equal(await rt.waitUntilSettled(2000, ac.signal), "aborted");
+});
+
+test("runtime: pending review queue keeps the newest bounded batch", async () => {
+let release;
+const prompts = [];
+const agent = {
+state: { messages: [], model: {} },
+async prompt(messages) {
+prompts.push(messages);
+if (prompts.length === 1) await new Promise((resolve) => { release = resolve; });
+this.state.messages.push({ role: "assistant", content: [], stopReason: "stop" });
+},
+abort() {},
+reset() {},
+};
+const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => true), 0);
+rt.push("turn 0");
+for (let i = 1; i <= 40; i++) rt.push(`turn ${i}`);
+release();
+assert.equal(await rt.waitUntilSettled(2000), "settled");
+const reviewed = prompts[1].map(({ content }) => content[0]?.text ?? "").join("\n");
+assert.match(reviewed, /(?:^|\n)turn 40(?:\n|$)/m);
+assert.doesNotMatch(reviewed, /(?:^|\n)turn 1(?:\n|$)/m);
+});
+
+test("runtime: reset failure disables advisor and reports the failure", () => {
+const debug = [];
+const agent = {
+state: { messages: [], model: {} },
+abort() {},
+reset() { throw new Error("reset failed"); },
+};
+const rt = new A.AdvisorRuntime(agent, new A.AdviseTool(() => true), 0, (...args) => debug.push(args.join(" ")));
+rt.reset();
+assert.equal(rt.disposed, true);
+assert.match(debug.join(" "), /advisor agent reset failed/);
 });
 
 test("runtime.waitUntilSettled: a dropped (3x-failed) review resolves 'failed', held preserved", async () => {

@@ -48,6 +48,7 @@ const DEBUG = !!process.env.ADVISOR_DEBUG;
 const dbg = (...a: unknown[]) => {
 	if (DEBUG) console.error("[advisor]", ...a);
 };
+const REVIEW_LOG_PATH = "/tmp/pi-omplike-advisor-reviews.jsonl";
 const BLOCK_BASE_MS = 15_000;
 const BLOCK_CAP_MS = 120_000;
 
@@ -94,7 +95,18 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 	let carriedAdvice: AdvisorNote[] = [];
 	let warnedUnavailableModelKey: string | undefined;
 	let activeSessionId: string | undefined;
-
+	function appendReviewLog(event: Record<string, unknown>, sessionId = activeSessionId || null): void {
+		try {
+			fs.appendFileSync(REVIEW_LOG_PATH, `${JSON.stringify({
+				timestamp: new Date().toISOString(),
+				pid: process.pid,
+				sessionId,
+				...event,
+			})}\n`, "utf8");
+		} catch (error) {
+			dbg("review log failed", error instanceof Error ? error.message : String(error));
+		}
+	}
 	const copyState = copyAdvisorSessionState;
 	const configKey = (state: AdvisorSessionState): string => JSON.stringify({ model: state.model, thinkingLevel: state.thinkingLevel });
 
@@ -182,6 +194,7 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 			{ customType: ADVISORY_TYPE, content, display: true, details: { notes } },
 			{ deliverAs: "steer", triggerTurn: !autoResumeSuppressed },
 		);
+		appendReviewLog({ event: "advice_injected", severity: severity ?? "nit", noteChars: note.length });
 	}
 
 	// The only immediate boundary flush: non-terminal turns drain queued nits.
@@ -242,6 +255,7 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 			dbg("deliverHeld", n.severity, JSON.stringify(n.note).slice(0, 120));
 			const content = formatAdvisoryContent([n], { finalAnswer, stale: !isHighSeverity(n.severity) });
 			pi.sendMessage({ customType: ADVISORY_TYPE, content, display: true, details: { notes: [n] } }, { deliverAs: "steer", triggerTurn: !autoResumeSuppressed });
+			appendReviewLog({ event: "advice_injected", severity: n.severity ?? "nit", noteChars: n.note.length });
 			// Record at the real delivery point (onAdvice→false never recorded it), so a
 			// later same-or-lower-severity repeat is deduped.
 			adviseTool?.markDelivered(n.note, n.severity);
@@ -360,6 +374,7 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 		// ADVISOR_COMPACT_AT: % of the advisor's context window at which it self-
 		// compacts (clamped 50..95; default 80).
 		const compactAt = Math.min(95, Math.max(50, Number(process.env.ADVISOR_COMPACT_AT) || 80));
+		const reviewSessionIds = new Map<number, string | null>();
 		builtRuntime = new AdvisorRuntime(agent, builtAdviseTool, 1000, dbg, compactAt, (outcome) => {
 			// A disposed/replaced runtime may settle late; never let it flush the new one.
 
@@ -367,6 +382,21 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 				flushSettledAdvice(outcome);
 				if (runtime === builtRuntime && pendingRuntimeRebuild && builtRuntime.idle && !turnRunning) retireRuntimeForRebuild();
 			}
+		},
+		(event) => {
+			if (event.phase === "started") reviewSessionIds.set(event.reviewNumber, activeSessionId || null);
+			const sessionId = reviewSessionIds.get(event.reviewNumber) ?? (activeSessionId || null);
+			appendReviewLog({
+				event: `review_${event.phase}`,
+				reviewNumber: event.reviewNumber,
+				batchTurns: event.batchTurns,
+				promptChars: event.promptChars,
+				attempt: event.attempt,
+				model: activeModelLabel ?? null,
+				...(event.outcome ? { outcome: event.outcome } : {}),
+				...(event.stopReason ? { stopReason: event.stopReason } : {}),
+			}, sessionId);
+			if (event.phase === "finished") reviewSessionIds.delete(event.reviewNumber);
 		});
 		runtime = builtRuntime;
 		activeModelLabel = `${model.provider}/${model.id}`;
@@ -479,6 +509,7 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 		// new/resume/fork replace history; reload/startup restore the current branch too.
 		if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") resetAdvisorState();
 		updateStatus(ctx);
+		appendReviewLog({ event: "session_start", reason: event.reason, enabled });
 	});
 
 	// Tool-path handoff replaces the transcript without a session_start event
@@ -488,7 +519,8 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 		if (["completed", "failed", "stopped"].includes(event?.state)) workflowRunStates.delete(event.runId);
 	});
 
-	pi.on("session_shutdown", (_event, ctx) => {
+	pi.on("session_shutdown", (event, ctx) => {
+		appendReviewLog({ event: "session_shutdown", reason: event.reason });
 		teardown();
 		if (activeSessionId) {
 			workflowSessionStates.delete(activeSessionId);

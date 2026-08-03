@@ -48,6 +48,20 @@ export function buildAdvisorAgent(opts: {
  * any history rewrite) the caller invokes `reset()`, which clears the advisor's
  * own context so the next delta replays fresh.
  */
+type AdvisorReviewEvent = {
+	phase: "started" | "finished";
+	reviewNumber: number;
+	batchTurns: number;
+	promptChars: number;
+	attempt: number;
+	outcome?: "ok" | "retry" | "failed" | "aborted";
+	stopReason?: string;
+};
+type StartedReview = Omit<AdvisorReviewEvent, "phase" | "outcome" | "stopReason">;
+const MAX_PENDING_TURNS = 32;
+const MAX_PENDING_CHARS = 512 * 1024;
+// ponytail: fixed pending cap; upgrade to model-aware coalescing if review lag matters.
+
 export class AdvisorRuntime {
 	#pending: string[] = [];
 	// The ONE pending-advice queue. Nits, concerns, and blockers all enter here;
@@ -68,6 +82,7 @@ export class AdvisorRuntime {
 	#backlog = 0;
 	#failures = 0;
 	#epoch = 0;
+	#reviewCount = 0;
 	// Lifetime input/output/cost from advisor turns already discarded by a
 	// self-compaction (#softReset). The agent's message list only holds the CURRENT
 	// (post-compaction) context, so without folding these in, /advisor status would
@@ -91,8 +106,12 @@ export class AdvisorRuntime {
 		private readonly onDebug?: (...a: unknown[]) => void,
 		compactAtPercent = 80,
 		private readonly onSettled?: (outcome: "ok" | "failed") => void,
+		private readonly onReview?: (event: AdvisorReviewEvent) => void,
 	) {
 		this.compactAtPercent = compactAtPercent;
+	}
+	#reportReview(event: AdvisorReviewEvent): void {
+		try { this.onReview?.(event); } catch (error) { this.onDebug?.("advisor review observer threw", String(error)); }
 	}
 
 	/**
@@ -103,25 +122,43 @@ export class AdvisorRuntime {
 	 * notes ride the reconfirm preamble). Unlike reset(), this does NOT bump the
 	 * epoch (the in-flight review is ours, not orphaned) nor drop queued/held work.
 	 */
-	#softReset(): void {
-		// Preserve lifetime token/cost accounting before the about-to-be-cleared
-		// messages are gone (see #cumInput/#cumOutput/#cumCost).
+	#softReset(): boolean {
+		let input = 0;
+		let output = 0;
+		let cost = 0;
+
+		// Preserve accounting only after reset succeeds; otherwise old messages remain.
 		for (const m of this.agent.state.messages) {
 			if (m.role === "assistant" && (m as AssistantMessage).usage) {
 				const u = (m as AssistantMessage).usage;
-				this.#cumInput += u.input ?? 0;
-				this.#cumOutput += u.output ?? 0;
-				this.#cumCost += u.cost?.total ?? 0;
+				input += u.input ?? 0;
+				output += u.output ?? 0;
+				cost += u.cost?.total ?? 0;
 			}
 		}
 		try {
 			this.agent.abort();
-		} catch {}
+		} catch (error) {
+			this.onDebug?.("advisor agent abort failed", String(error));
+		}
 		try {
 			this.agent.reset();
-		} catch {}
+		} catch (error) {
+			this.onDebug?.("advisor agent reset failed", String(error));
+			this.disposed = true;
+			this.#pending = [];
+			this.#advice = [];
+			this.#reraised = undefined;
+			this.#lastOutcome = "failed";
+			this.#backlog = 0;
+			this.#cancelWaiters();
+			return false;
+		}
+		this.#cumInput += input;
+		this.#cumOutput += output;
+		this.#cumCost += cost;
+		return true;
 	}
-
 	get backlog(): number {
 		return this.#backlog;
 	}
@@ -181,7 +218,7 @@ export class AdvisorRuntime {
 	 * immediately if already idle/disposed.
 	 */
 	waitUntilSettled(timeoutMs: number, signal?: AbortSignal): Promise<"settled" | "timeout" | "aborted" | "failed"> {
-		if (this.disposed) return Promise.resolve("aborted");
+		if (this.disposed || signal?.aborted) return Promise.resolve("aborted");
 		if (this.idle) return Promise.resolve(this.#lastOutcome === "failed" ? "failed" : "settled");
 		return new Promise((resolve) => {
 			let done = false;
@@ -245,11 +282,25 @@ export class AdvisorRuntime {
 		return { input, output, cost, contextTokens, contextPercent };
 	}
 
-	/** Queue a rendered primary-turn delta (markdown string) for review. */
+	/** Queue a rendered primary-turn delta for review, keeping the newest work first. */
 	push(deltaText: string): void {
 		if (this.disposed || !deltaText.trim()) return;
+		if (deltaText.length > MAX_PENDING_CHARS) {
+			this.onDebug?.("advisor dropped oversized pending delta", deltaText.length);
+			return;
+		}
 		this.#pending.push(deltaText);
 		this.#backlog++;
+		let pendingChars = this.#pending.reduce((total, text) => total + text.length, 0);
+		let droppedTurns = 0;
+		while (this.#pending.length > MAX_PENDING_TURNS || pendingChars > MAX_PENDING_CHARS) {
+			const dropped = this.#pending.shift();
+			if (dropped === undefined) break;
+			pendingChars -= dropped.length;
+			droppedTurns++;
+			this.#backlog = Math.max(0, this.#backlog - 1);
+		}
+		if (droppedTurns) this.onDebug?.("advisor capped pending queue", droppedTurns);
 		void this.#drain();
 	}
 
@@ -267,10 +318,15 @@ export class AdvisorRuntime {
 		this.adviseTool.resetDelivered();
 		try {
 			this.agent.abort();
-		} catch {}
+		} catch (error) {
+			this.onDebug?.("advisor agent abort failed", String(error));
+		}
 		try {
 			this.agent.reset();
-		} catch {}
+		} catch (error) {
+			this.onDebug?.("advisor agent reset failed", String(error));
+			this.disposed = true;
+		}
 		this.#cancelWaiters();
 	}
 
@@ -284,7 +340,9 @@ export class AdvisorRuntime {
 		this.#backlog = 0;
 		try {
 			this.agent.abort();
-		} catch {}
+		} catch (error) {
+			this.onDebug?.("advisor agent abort failed", String(error));
+		}
 		this.#cancelWaiters();
 	}
 
@@ -331,9 +389,10 @@ export class AdvisorRuntime {
 				const pct = this.usage.contextPercent;
 				if (pct !== null && pct >= this.compactAtPercent && this.agent.state.messages.length > 0) {
 					this.onDebug?.("advisor self-compacting (proactive), ctx=", pct, "% >=", this.compactAtPercent, "%");
-					this.#softReset();
+					if (!this.#softReset()) break;
 				}
 				let stale = false;
+				let startedReview: StartedReview | undefined;
 				try {
 					// Inner loop: at most ONE reactive self-compaction retry. If the
 					// advisor's own context overflows mid-review (stopReason "length"), clear
@@ -343,16 +402,39 @@ export class AdvisorRuntime {
 					// doesn't fit, so it falls through to the failed handling below.
 					let last: AssistantMessage | undefined;
 					for (let attempt = 0; attempt < 2; attempt++) {
+						const review: StartedReview = { reviewNumber: ++this.#reviewCount, batchTurns: turns, promptChars, attempt: attempt + 1 };
+						startedReview = review;
+						this.#reportReview({ phase: "started", ...review });
 						this.onDebug?.("prompting advisor agent, delta chars=", promptChars, "held=", offered.length);
 						await this.agent.prompt(messages);
-						if (this.#epoch !== epoch) {
+						const staleAfterPrompt = this.#epoch !== epoch;
+						last = this.agent.state.messages[this.agent.state.messages.length - 1] as AssistantMessage;
+						const outcome: AdvisorReviewEvent["outcome"] = staleAfterPrompt
+							? "aborted"
+							: last?.stopReason === "length" && attempt === 0
+								? "retry"
+								: last?.stopReason === "aborted"
+									? "aborted"
+									: last?.stopReason === "error" || last?.stopReason === "length"
+										? "failed"
+										: "ok";
+						this.#reportReview({
+							phase: "finished",
+							...review,
+							outcome,
+							...(last?.stopReason ? { stopReason: last.stopReason } : {}),
+						});
+						startedReview = undefined;
+						if (staleAfterPrompt) {
 							stale = true;
 							break; // reset/dispose during the prompt; batch is stale
 						}
-						last = this.agent.state.messages[this.agent.state.messages.length - 1] as AssistantMessage;
 						if (last?.stopReason === "length" && attempt === 0) {
 							this.onDebug?.("advisor context overflow, self-compacting (reactive) and replaying batch fresh");
-							this.#softReset();
+							if (!this.#softReset()) {
+								stale = true;
+								break;
+							}
 							// Roll back attempt-only queue mutations by intersection. Concurrently
 							// drained entries stay gone; surviving pre-attempt entries regain severity.
 							const before = new Map(offered.map((n) => [dedupeKey(n.note), n]));
@@ -390,6 +472,14 @@ export class AdvisorRuntime {
 					}
 					this.#reraised = undefined;
 				} catch (e) {
+					if (startedReview) {
+						this.#reportReview({
+							phase: "finished",
+							...startedReview,
+							outcome: this.#epoch !== epoch ? "aborted" : "failed",
+						});
+						startedReview = undefined;
+					}
 					this.#reraised = undefined;
 					this.onDebug?.("advisor prompt threw", String(e));
 					// A reset/dispose aborts the in-flight prompt; drop the stale batch.

@@ -102,9 +102,10 @@ export function formatTurnDelta(opts: {
 				// verbatim; for a failed edit they're the only evidence of what was attempted.
 				const edits = (c.arguments as { edits?: unknown[] } | undefined)?.edits;
 				const hasDiff = diffByCallId.has((c as { id?: string }).id ?? "");
-				if (hasDiff && Array.isArray(edits)) {
+				if (hasDiff) {
 					const p = (c.arguments as { path?: string }).path ?? "?";
-					sub.push(`→ tool \`${c.name}\`(${p}) — ${edits.length} block(s); diff in tool result`);
+					const blocks = Array.isArray(edits) ? ` — ${edits.length} block(s)` : "";
+					sub.push(`→ tool \`${c.name}\`(${p})${blocks}; diff in tool result`);
 				} else {
 					const argsText = renderToolArgs(c.arguments as Record<string, unknown> | undefined);
 					sub.push(argsText ? `→ tool \`${c.name}\`:\n${argsText}` : `→ tool \`${c.name}\``);
