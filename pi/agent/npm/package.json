@@ -2,17 +2,17 @@
   "name": "pi-extensions",
   "private": true,
   "dependencies": {
-    "@narumitw/pi-goal": "^0.40.1",
+    "@narumitw/pi-goal": "^0.46.0",
     "@plannotator/pi-extension": "^0.25.1",
     "@sting8k/pi-vcc": "^0.5.0",
     "@tintinweb/pi-subagents": "^0.14.3",
     "pi-anthropic-oauth": "^0.2.3",
     "pi-btw": "^0.4.1",
-    "pi-markdown-preview": "^0.10.1",
+    "pi-markdown-preview": "^0.11.1",
     "pi-orcarouter": "^0.1.0",
     "pi-tool-display": "^0.5.0",
     "pi-vim": "^0.14.1",
-    "pi-web-access": "^0.17.0",
+    "pi-web-access": "^0.18.0",
     "visual-explainer": "^0.8.1"
   }
 }
