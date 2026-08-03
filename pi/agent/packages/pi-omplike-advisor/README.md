@@ -82,7 +82,7 @@ packages.)
 - `/advisor model provider/model [thinking]` — configure the advisor directly.
 - `/advisor model default` or `/advisor model reset` — clear the session override.
 
-Session settings are stored in the current Pi session and restored on resume. New sessions start disabled; the old global `.advisor-state.json` file is ignored.
+Session settings are stored in the current Pi session and restored on resume. New sessions follow `modes.json`'s `advisor.autostart` setting (default `false`); an explicit `/advisor on` or `/advisor off` session setting overrides it. The old global `.advisor-state.json` file is ignored.
 
 ### Workflow agents
 
@@ -95,7 +95,7 @@ Advisor reviews are out-of-band observer work. Their tokens and cost are exclude
 
 ### Advisor model
 
-The advisor model defaults to the `advisor` entry in `modes.json` (project `.pi/modes.json` or global `~/.pi/agent/modes.json`). Its `provider`, `modelId`, and optional `thinkingLevel` are used unless overridden for the current session:
+The advisor model defaults to the `advisor` entry in `modes.json` (project `.pi/modes.json` or global `~/.pi/agent/modes.json`). Its `provider`, `modelId`, optional `thinkingLevel`, and optional boolean `autostart` are used unless overridden for the current session:
 
 ```json
 {
@@ -103,7 +103,8 @@ The advisor model defaults to the `advisor` entry in `modes.json` (project `.pi/
     "advisor": {
       "provider": "openrouter",
       "modelId": "z-ai/glm-5.2",
-      "thinkingLevel": "low"
+      "thinkingLevel": "low",
+      "autostart": true
     }
   }
 }

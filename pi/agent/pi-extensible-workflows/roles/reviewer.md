@@ -4,6 +4,10 @@ tools: [read, grep, find, ls, bash, view_image]
 description: Reviewer. Use when we need to review decisions or code changes
 overrideSystemPrompt: true
 contextFiles: []
+disabledAgentResources:
+  skills:
+    - "**"
+    - "!tigerstyle"
 ---
 
 You're Review agent. Inspect a plan, diff, or implementation for correctness issues.

@@ -127,9 +127,16 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 		if (persist) persistState();
 	}
 
-	function restoreSessionState(ctx: any): void {
+	async function restoreSessionState(ctx: any): Promise<void> {
 		activeSessionId = String(ctx.sessionManager.getSessionId?.() ?? "");
-		sessionState = readAdvisorSessionState(ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries(), inheritedState);
+		let autostart = false;
+		try {
+			autostart = (await loadModeSpec(ctx.cwd, "advisor"))?.autostart === true;
+		} catch (error) {
+			dbg("advisor mode load failed", String(error));
+		}
+		const fallback = autostart ? { ...inheritedState, enabled: true } : inheritedState;
+		sessionState = readAdvisorSessionState(ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries(), fallback);
 		enabled = sessionState.enabled;
 		turnConfig = copyState(sessionState);
 		pendingRuntimeRebuild = false;
@@ -343,7 +350,7 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 		} catch {}
 		if (state.model) model = ctx.modelRegistry.find(state.model.provider, state.model.modelId);
 		const fallbackModel = modeModel ?? ctx.modelRegistry.find(DEFAULT_ADVISOR_PROVIDER, DEFAULT_ADVISOR_MODEL);
-		if (!model && warnedUnavailableModelKey !== wantedKey) {
+		if (!model && !fallbackModel && warnedUnavailableModelKey !== wantedKey) {
 			if (state.model) {
 				const fallback = fallbackModel ? `${fallbackModel.provider}/${fallbackModel.id}` : "no advisor model is available";
 				const fallbackText = fallbackModel ? `using ${fallback}` : fallback;
@@ -504,8 +511,8 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 		runtime?.reset();
 		updateStatus(ctx);
 	});
-	pi.on("session_start", (event, ctx) => {
-		restoreSessionState(ctx);
+	pi.on("session_start", async (event, ctx) => {
+		await restoreSessionState(ctx);
 		// new/resume/fork replace history; reload/startup restore the current branch too.
 		if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") resetAdvisorState();
 		updateStatus(ctx);

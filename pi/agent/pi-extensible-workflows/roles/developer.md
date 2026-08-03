@@ -2,6 +2,9 @@
 model: developer-model
 tools: [read, grep, find, ls, bash, replace, undo_last_replace, view_image]
 description: Developer focused agent
+disabledAgentResources:
+  skills:
+    - "!tigerstyle"
 ---
 
 # Developer Role

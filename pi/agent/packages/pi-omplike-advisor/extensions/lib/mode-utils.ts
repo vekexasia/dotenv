@@ -13,6 +13,7 @@ export type ModeSpec = {
 	provider?: string;
 	modelId?: string;
 	thinkingLevel?: string;
+	autostart?: boolean;
 };
 
 /**
@@ -49,6 +50,7 @@ export async function loadModeSpec(
 					provider: typeof spec.provider === "string" ? spec.provider : undefined,
 					modelId: typeof spec.modelId === "string" ? spec.modelId : undefined,
 					thinkingLevel: typeof spec.thinkingLevel === "string" ? spec.thinkingLevel : undefined,
+					autostart: typeof spec.autostart === "boolean" ? spec.autostart : undefined,
 				};
 			}
 		} catch {

@@ -32,6 +32,10 @@ import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const TEST_AGENT_DIR = mkdtempSync(join(tmpdir(), "pi-advisor-test-agent-"));
+writeFileSync(join(TEST_AGENT_DIR, "modes.json"), JSON.stringify({ modes: { advisor: { thinkingLevel: "high", autostart: false } } }));
+process.env.PI_CODING_AGENT_DIR = TEST_AGENT_DIR;
+process.once("exit", () => rmSync(TEST_AGENT_DIR, { recursive: true, force: true }));
 const PI_BIN = execSync("command -v pi").toString().trim();
 // PI_DIST overrides bin-based resolution (needed when `pi` is a wrapper script
 // rather than a symlink into the install, e.g. pointing at a pi-mono checkout).
@@ -1689,7 +1693,7 @@ async function lifecycleHarness() {
 	};
 }
 let sessionHarnessId = 0;
-async function sessionConfigHarness(initialEntries = [], picks = [], modelList, sessionId = `advisor-session-${++sessionHarnessId}`) {
+async function sessionConfigHarness(initialEntries = [], picks = [], modelList, sessionId = `advisor-session-${++sessionHarnessId}`, cwd = HERE) {
 	const entries = [...initialEntries];
 	const notifications = [];
 	const selections = [];
@@ -1706,7 +1710,7 @@ async function sessionConfigHarness(initialEntries = [], picks = [], modelList, 
 	const ext = res.extensions[0];
 	const h = (name) => { const value = ext.handlers.get(name); return Array.isArray(value) ? value[0] : value; };
 	const ctx = {
-		cwd: HERE,
+		cwd,
 		mode: "rpc",
 		hasUI: true,
 		model: undefined,
@@ -1737,6 +1741,22 @@ test("session defaults disabled and command changes persist as custom session en
 	const resumed = await sessionConfigHarness(fresh.entries);
 	await resumed.cmd("status", resumed.ctx);
 	assert.ok(resumed.notifications.some((message) => message.includes("advisor enabled")));
+});
+
+test("advisor autostarts when modes.json enables it", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pi-advisor-autostart-"));
+	let auto;
+	try {
+		mkdirSync(join(root, ".pi"));
+		writeFileSync(join(root, ".pi", "modes.json"), JSON.stringify({ modes: { advisor: { provider: "p1", modelId: "m1", autostart: true } } }));
+		auto = await sessionConfigHarness([], [], undefined, "autostart", root);
+		auto.setAllowModels(true);
+		await auto.cmd("status", auto.ctx);
+		assert.ok(auto.notifications.some((message) => message.includes("advisor enabled")));
+	} finally {
+		await auto?.shutdown();
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("workflow children inherit one live parent advisor snapshot per run", async () => {

@@ -56,14 +56,26 @@ function colorPercent(theme: Theme, percent: number | null | undefined): string 
 	return theme.fg("muted", `${rounded}%`);
 }
 
-function buildThinkingDots(pi: ExtensionAPI, theme: Theme): string {
-	const levels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+function buildThinkingDots(
+	pi: ExtensionAPI,
+	theme: Theme,
+	maxThinkingSupported: boolean,
+	maxAnimationFrame = 0,
+): string {
+	const levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+	if (maxThinkingSupported) levels.push("max");
 	let level: string = "off";
 	try {
 		level = pi.getThinkingLevel();
 	} catch {}
 
-	const filled = Math.max(0, levels.indexOf(level as (typeof levels)[number]));
+	if (maxThinkingSupported && level === "max") {
+		const highlight = maxAnimationFrame % (levels.length - 1);
+		const dots = Array.from({ length: levels.length - 1 }, (_, index) => index === highlight ? "✦" : "▪").join("");
+		return theme.fg("thinkingMax", dots);
+	}
+
+	const filled = Math.max(0, levels.indexOf(level));
 	const color = level === "xhigh"
 		? "error"
 		: level === "high"
@@ -71,7 +83,7 @@ function buildThinkingDots(pi: ExtensionAPI, theme: Theme): string {
 			: level === "medium"
 				? "accent"
 				: "text";
-	return theme.fg(color, "▪".repeat(filled)) + theme.fg("dim", "▫".repeat(5 - filled));
+	return theme.fg(color, "▪".repeat(filled)) + theme.fg("dim", "▫".repeat(levels.length - 1 - filled));
 }
 
 function joinSides(left: string, right: string, width: number, ellipsis: string): string {
@@ -158,6 +170,8 @@ function applyFooter(pi: ExtensionAPI, ctx: ExtensionContext, notifyState: { act
 		const unsub = footerData.onBranchChange(() => tui.requestRender());
 
 		let blinkTimer: ReturnType<typeof setInterval> | null = null;
+		let maxAnimationTimer: ReturnType<typeof setInterval> | null = null;
+		let maxAnimationFrame = 0;
 
 		function startBlink(): void {
 			if (blinkTimer) return;
@@ -174,6 +188,35 @@ function applyFooter(pi: ExtensionAPI, ctx: ExtensionContext, notifyState: { act
 				blinkTimer = null;
 			}
 			notifyState.blinkOn = false;
+		}
+
+		function isMaxThinking(): boolean {
+			try {
+				return pi.getThinkingLevel() === "max";
+			} catch {
+				return false;
+			}
+		}
+
+		function startMaxAnimation(): void {
+			if (maxAnimationTimer) return;
+			maxAnimationTimer = setInterval(() => {
+				if (!isMaxThinking()) {
+					stopMaxAnimation();
+					tui.requestRender();
+					return;
+				}
+				maxAnimationFrame = (maxAnimationFrame + 1) % 6;
+				tui.requestRender();
+			}, 180);
+		}
+
+		function stopMaxAnimation(): void {
+			if (maxAnimationTimer) {
+				clearInterval(maxAnimationTimer);
+				maxAnimationTimer = null;
+			}
+			maxAnimationFrame = 0;
 		}
 
 		function dismissOnKeypress(): void {
@@ -206,6 +249,7 @@ function applyFooter(pi: ExtensionAPI, ctx: ExtensionContext, notifyState: { act
 		return {
 			dispose() {
 				stopBlink();
+				stopMaxAnimation();
 				unsub();
 				unsubFired();
 			},
@@ -221,6 +265,9 @@ function applyFooter(pi: ExtensionAPI, ctx: ExtensionContext, notifyState: { act
 				const model = formatModelLabel(ctx.model?.id);
 				const activeTools = getActiveToolSet(pi);
 				const availableTools = getAvailableToolSet(pi);
+				const maxThinkingSupported = ctx.model?.reasoning === true && ctx.model?.thinkingLevelMap?.max != null;
+				if (maxThinkingSupported && isMaxThinking()) startMaxAnimation();
+				else stopMaxAnimation();
 
 				const bell = notifyState.active && notifyState.blinkOn ? ` ${theme.fg("warning", "🔔")}` : "";
 
@@ -245,7 +292,12 @@ function applyFooter(pi: ExtensionAPI, ctx: ExtensionContext, notifyState: { act
 					theme.fg("dim", "⟪ "),
 					theme.bold(model),
 					" ",
-					buildThinkingDots(pi, theme),
+					buildThinkingDots(
+						pi,
+						theme,
+						maxThinkingSupported,
+						maxAnimationFrame,
+					),
 					windowTokens ? theme.fg("muted", ` ${windowTokens}`) : "",
 					theme.fg("dim", " ⟫"),
 				].join("");
