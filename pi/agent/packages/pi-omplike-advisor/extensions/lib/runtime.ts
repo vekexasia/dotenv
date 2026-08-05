@@ -1,7 +1,8 @@
 /** Persistent advisor agent and its serialized review runtime. */
 
 import { Agent } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { lazyStream, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import { getApiProvider } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -27,6 +28,7 @@ export function buildAdvisorAgent(opts: {
 }): Agent {
 	const readOnly = createReadOnlyTools(opts.cwd);
 	const thinkingLevel = opts.model.reasoning ? (opts.thinkingLevel as any) : ("off" as any);
+	const needsProviderStream = !!opts.model.api && !getApiProvider(opts.model.api);
 	return new Agent({
 		initialState: {
 			systemPrompt: opts.systemPrompt,
@@ -35,8 +37,28 @@ export function buildAdvisorAgent(opts: {
 			tools: [opts.adviseTool, ...readOnly] as any,
 		},
 		convertToLlm,
-		// The installed pi-agent-core versions disagree on whether streamFn is required in the type.
-		getApiKey: (provider: string) => opts.modelRegistry.getApiKeyForProvider(provider),
+		// Unknown API tags belong to extension-defined providers (for example
+		// xai-auth's `xai-responses`); route only those through the provider stream.
+		...(needsProviderStream ? {
+			streamFn: (model: Model<any>, context: any, options: any) => lazyStream(model, async () => {
+				const activeProvider = opts.modelRegistry.getProvider?.(model.provider);
+				if (!activeProvider?.streamSimple) throw new Error(`Advisor provider ${model.provider} has no streamSimple handler`);
+				if (typeof opts.modelRegistry.getApiKeyAndHeaders !== "function")
+					throw new Error("Custom advisor providers require ModelRegistry.getApiKeyAndHeaders");
+				const auth = await opts.modelRegistry.getApiKeyAndHeaders(model);
+				if (!auth.ok) throw new Error(auth.error);
+				const headers = auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined;
+				const env = auth.env || options?.env ? { ...auth.env, ...options?.env } : undefined;
+				return activeProvider.streamSimple(model, context, {
+					...options,
+					apiKey: options?.apiKey ?? auth.apiKey,
+					headers,
+					env,
+				});
+			}),
+		} : {
+			getApiKey: (provider: string) => opts.modelRegistry.getApiKeyForProvider(provider),
+		}),
 	} as any);
 }
 

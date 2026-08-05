@@ -59,16 +59,18 @@ const NM = [resolve(DIST, "..", "node_modules"), resolve(DIST, "..", "..", "..",
 );
 const pkgEntry = (pkg) => resolve(NM, "@earendil-works", pkg, "dist/index.js");
 const { Agent: CoreAgent, setDefaultStreamFn } = await import(pkgEntry("pi-agent-core"));
-const { EventStream } = await import(resolve(NM, "@earendil-works", "pi-ai", "dist/compat.js"));
+const { EventStream, streamSimple: defaultStreamFn } = await import(resolve(NM, "@earendil-works", "pi-ai", "dist/compat.js"));
 const ALIAS = {
 	"@earendil-works/pi-coding-agent": `${DIST}/index.js`,
 	"@earendil-works/pi-agent-core": pkgEntry("pi-agent-core"),
 	"@earendil-works/pi-tui": pkgEntry("pi-tui"),
 	"@earendil-works/pi-ai": pkgEntry("pi-ai"),
+	"@earendil-works/pi-ai/compat": resolve(NM, "@earendil-works", "pi-ai", "dist/compat.js"),
 	typebox: resolve(NM, "typebox", "build", "index.mjs"),
 };
 const jiti = createJiti(import.meta.url, { moduleCache: false, alias: ALIAS });
 const A = await jiti.import(resolve(HERE, "advisor.ts"));
+const { buildAdvisorAgent } = await jiti.import(resolve(HERE, "lib/runtime.ts"));
 const WORKFLOW_CORE = (() => {
 	try { return createRequire(import.meta.url)("pi-extensible-workflows"); }
 	catch { return undefined; }
@@ -1844,6 +1846,84 @@ test("TUI model picker Escape cancels without persisting a session model entry",
 	};
 	await picker.cmd("model", picker.ctx);
 	assert.deepEqual(picker.entries, []);
+});
+
+test("advisor agent uses an extension-defined provider stream", async () => {
+	setDefaultStreamFn(() => { throw new Error("fallback stream should not be used"); });
+	const calls = [];
+	const model = {
+		provider: "custom-provider",
+		id: "custom-model",
+		name: "Custom model",
+		api: "custom-api",
+		baseUrl: "https://custom.example",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 1000,
+		maxTokens: 1000,
+	};
+	const provider = {
+		streamSimple(streamModel, _context, options) {
+			calls.push({
+				receiver: this,
+				model: `${streamModel.provider}/${streamModel.id}`,
+				baseUrl: streamModel.baseUrl,
+				apiKey: options?.apiKey,
+				headers: options?.headers,
+				env: options?.env,
+			});
+			const stream = new EventStream(
+				(event) => event.type === "done" || event.type === "error",
+				(event) => (event.type === "done" ? event.message : event.error),
+			);
+			queueMicrotask(() => stream.push({
+				type: "done",
+				reason: "stop",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "silent review" }],
+					api: "custom-api",
+					provider: streamModel.provider,
+					model: streamModel.id,
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "stop",
+					timestamp: Date.now(),
+				},
+			}));
+			return stream;
+		},
+	};
+	const agent = buildAdvisorAgent({
+		cwd: HERE,
+		model,
+		thinkingLevel: "off",
+		systemPrompt: "Review the turn.",
+		modelRegistry: {
+			getProvider: (id) => id === model.provider ? provider : undefined,
+			getApiKeyAndHeaders: async () => ({
+				ok: true,
+				apiKey: "oauth-token",
+				headers: { authorization: "Bearer oauth-token" },
+				env: { CUSTOM_ENV: "yes" },
+			}),
+		},
+		adviseTool: new A.AdviseTool(() => true),
+	});
+	try {
+		await agent.prompt("Review this.");
+		assert.equal(calls.length, 1);
+		assert.deepEqual(calls[0], {
+			receiver: provider,
+			model: "custom-provider/custom-model",
+			baseUrl: "https://custom.example",
+			apiKey: "oauth-token",
+			headers: { authorization: "Bearer oauth-token" },
+			env: { CUSTOM_ENV: "yes" },
+		});
+	} finally {
+		setDefaultStreamFn(defaultStreamFn);
+	}
 });
 
 test("deferred model changes leave the busy review intact and rebuild at the safe boundary", async () => {
