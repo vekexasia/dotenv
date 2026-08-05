@@ -109,6 +109,8 @@ fi
 sync_pi
 npx skills add herdrdev/herdr --skill herdr --global --agent pi --copy --yes
 npx skills add mattpocock/skills --skill triage --global --agent pi --copy --yes
+npx skills@latest add mattpocock/skills --skill grill-me --global --agent pi --copy --yes
+npx skills@latest add mattpocock/skills --skill grilling --global --agent pi --copy --yes
 command -v herdr >/dev/null 2>&1 && herdr integration install pi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
