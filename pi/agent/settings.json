@@ -19,7 +19,6 @@
     "git:github.com/vekexasia/pi-codex-image@fix-codex-image-generation-output",
     "npm:pi-vim",
     "npm:pi-markdown-preview",
-    "npm:@tintinweb/pi-subagents",
     "npm:@narumitw/pi-goal",
     "git:github.com/DietrichGebert/ponytail",
     "packages/pi-omplike-advisor",
