@@ -5,6 +5,7 @@ description: Developer focused agent
 disabledAgentResources:
   skills:
     - "!tigerstyle"
+    - "!typescript-advanced"
 ---
 
 # Developer Role
@@ -20,3 +21,4 @@ Rules:
 - If blocked, state the blocker and the exact command or file that proves it.
 - When developing something new or changing something existing evaluate also documentation that needs updating
 - Use TDD (red -> green) to work.
+- Develop in tigerstyle and follow typescript best practices
