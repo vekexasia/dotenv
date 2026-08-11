@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.84.1",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
-  "defaultThinkingLevel": "max",
+  "defaultProvider": "openrouter",
+  "defaultModel": "deepseek/deepseek-v4-flash-0731",
+  "defaultThinkingLevel": "high",
   "theme": "dark",
   "packages": [
     "npm:pi-web-access",
@@ -29,7 +29,9 @@
     "../../git/personale/pi-workflows",
     "npm:pi-orcarouter",
     "npm:@plannotator/pi-extension",
-    "../../git/personale/pi-workflows/packages/extensions/herdr"
+    "../../git/personale/pi-workflows/packages/extensions/herdr",
+    "npm:@benvargas/pi-openai-fast",
+    "../../git/personale/pi-workflows/packages/extensions/subagents"
   ],
   "skills": [
     "-skills/browser-use"
