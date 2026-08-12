@@ -5,7 +5,7 @@
     "cheap-model": "openai-codex/gpt-5.6-luna:high",
     "scout-model": "cheap-model",
     "tests-expert": "cheap-model",
-    "developer-model": "cheap-model:max"
+    "developer-model": "cheap-model:xhigh"
   },
   "disabledAgentResources": {
     "skills": [

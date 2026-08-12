@@ -1,12 +1,12 @@
 {
   "lastChangelogVersion": "0.84.1",
-  "defaultProvider": "openrouter",
-  "defaultModel": "deepseek/deepseek-v4-flash-0731",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
   "defaultThinkingLevel": "high",
   "theme": "dark",
   "packages": [
     "npm:pi-web-access",
-    "git:github.com/pasky/chrome-cdp-skill@v1.0.1",
+    "git:github.com/vekexasia/chrome-cdp-skill@feat/cdp-ws-url",
     "npm:visual-explainer",
     {
       "source": "git:github.com/vekexasia/pi-high-availability",
