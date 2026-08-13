@@ -2,8 +2,11 @@ import { writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Key } from "@mariozechner/pi-tui";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { Key } from "@earendil-works/pi-tui";
 
 const SEPARATOR = "===== EDIT BELOW THIS LINE =====\n";
 
@@ -27,7 +30,8 @@ async function editPromptInNvim(ctx: ExtensionContext) {
         type: string;
         message?: { role?: string; content?: unknown };
       };
-      if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+      if (entry.type !== "message" || entry.message?.role !== "assistant")
+        continue;
       const content = entry.message.content;
       if (typeof content === "string") {
         lastMessage = content;
@@ -43,10 +47,11 @@ async function editPromptInNvim(ctx: ExtensionContext) {
     // Create temp file with last message + separator + current input
     const currentInput = ctx.ui.getEditorText();
     const tempFile = join(tmpdir(), `pi-prompt-${Date.now()}.md`);
-    const content = lastMessage ? `${lastMessage}\n\n${SEPARATOR}${currentInput}` : `${SEPARATOR}${currentInput}`;
+    const content = lastMessage
+      ? `${lastMessage}\n\n${SEPARATOR}${currentInput}`
+      : `${SEPARATOR}${currentInput}`;
 
     writeFileSync(tempFile, content);
-
 
     // Open in nvim at end of file
     spawnSync("nvim", ["+", tempFile], { stdio: "inherit" });
@@ -76,6 +81,9 @@ async function editPromptInNvim(ctx: ExtensionContext) {
     // Clean up
     unlinkSync(tempFile);
   } catch (err) {
-    ctx.ui.notify(`Error: ${err instanceof Error ? err.message : String(err)}`, "error");
+    ctx.ui.notify(
+      `Error: ${err instanceof Error ? err.message : String(err)}`,
+      "error",
+    );
   }
 }

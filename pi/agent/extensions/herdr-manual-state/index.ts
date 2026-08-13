@@ -6,7 +6,8 @@ const eventData = (sessionId: string) => ({
 });
 
 export default function (pi: ExtensionAPI) {
-  if (process.env.HERDR_ENV !== "1" || process.env.HERDR_MANUAL_STATE !== "1") return;
+  if (process.env.HERDR_ENV !== "1" || process.env.HERDR_MANUAL_STATE !== "1")
+    return;
 
   let manualSessionId: string | undefined;
 

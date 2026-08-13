@@ -34,7 +34,10 @@ export default function (pi: ExtensionAPI) {
       const newId = randomUUID();
       const timestamp = new Date().toISOString();
       const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-      const newFile = join(dirname(sourceFile), `${fileTimestamp}_${newId}.jsonl`);
+      const newFile = join(
+        dirname(sourceFile),
+        `${fileTimestamp}_${newId}.jsonl`,
+      );
 
       const newHeader = {
         type: "session",
@@ -69,10 +72,26 @@ function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-async function spawnHerdrPane(cwd: string, sessionFile: string, paneId: string): Promise<void> {
-  const split = await run("herdr", ["pane", "split", paneId, "--direction", "down"]);
+async function spawnHerdrPane(
+  cwd: string,
+  sessionFile: string,
+  paneId: string,
+): Promise<void> {
+  const split = await run("herdr", [
+    "pane",
+    "split",
+    paneId,
+    "--direction",
+    "down",
+  ]);
   const newPane = JSON.parse(split)?.result?.pane?.pane_id;
-  if (typeof newPane !== "string" || !newPane) throw new Error("herdr did not return a pane id");
+  if (typeof newPane !== "string" || !newPane)
+    throw new Error("herdr did not return a pane id");
 
-  await run("herdr", ["pane", "run", newPane, `cd ${shq(cwd)} && pi --session ${shq(sessionFile)}; exec bash -l`]);
+  await run("herdr", [
+    "pane",
+    "run",
+    newPane,
+    `cd ${shq(cwd)} && pi --session ${shq(sessionFile)}; exec bash -l`,
+  ]);
 }

@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 
 type ToolDisplayApi = {
   version: 1;
@@ -16,7 +19,8 @@ const PENDING_KEY = Symbol.for("pi-tool-display.pendingDecorations.v1");
 const MARK = Symbol.for("hashline-tool-display-bridge.decorated");
 
 const toolDisplayConfigPath = join(
-  process.env.PI_CODING_AGENT_DIR ?? join(process.env.HOME ?? homedir(), ".pi", "agent"),
+  process.env.PI_CODING_AGENT_DIR ??
+    join(process.env.HOME ?? homedir(), ".pi", "agent"),
   "extensions",
   "pi-tool-display",
   "config.json",
@@ -24,7 +28,10 @@ const toolDisplayConfigPath = join(
 
 type GlobalWithToolDisplay = typeof globalThis & {
   [API_KEY]?: ToolDisplayApi;
-  [PENDING_KEY]?: Array<{ tool: Record<string, unknown>; adapter?: Record<string, unknown> }>;
+  [PENDING_KEY]?: Array<{
+    tool: Record<string, unknown>;
+    adapter?: Record<string, unknown>;
+  }>;
 };
 type BridgeTool = ToolDefinition & Record<string | symbol, unknown>;
 
@@ -40,7 +47,8 @@ function readJson(file: string): Record<string, unknown> {
 function keepToolDisplayOffRead(): void {
   const config = readJson(toolDisplayConfigPath);
   const ownership = {
-    ...((config.registerToolOverrides as Record<string, unknown> | undefined) ?? {}),
+    ...((config.registerToolOverrides as Record<string, unknown> | undefined) ??
+      {}),
     read: false,
   };
   const next = { ...config, registerToolOverrides: ownership };
@@ -56,7 +64,10 @@ function decorateInPlace(tool: BridgeTool): void {
   const api = globals[API_KEY];
 
   if (api?.version === 1 && typeof api.decorateTool === "function") {
-    Object.assign(tool, api.decorateTool(tool as Record<string, unknown>, adapter));
+    Object.assign(
+      tool,
+      api.decorateTool(tool as Record<string, unknown>, adapter),
+    );
   } else {
     const queue = globals[PENDING_KEY] ?? [];
     queue.push({ tool: tool as Record<string, unknown>, adapter });

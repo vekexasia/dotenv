@@ -1,5 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdirSync, readFileSync, unwatchFile, watchFile, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  unwatchFile,
+  watchFile,
+  writeFileSync,
+} from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -7,7 +13,8 @@ import { randomUUID } from "node:crypto";
 // Live dashboard reporter: each pi session (including in-process subagents,
 // which get their own extension binding) sends its state to a local dashboard server.
 
-const URL = process.env.PI_LIVE_DASHBOARD_URL ?? "http://127.0.0.1:3939/snapshot";
+const URL =
+  process.env.PI_LIVE_DASHBOARD_URL ?? "http://127.0.0.1:3939/snapshot";
 const DIR = join(homedir(), ".pi");
 const ENABLED_FILE = join(DIR, "live-dashboard.enabled");
 
@@ -29,7 +36,8 @@ interface ToolEntry {
 function toolDetail(name: string, args: any): string {
   if (!args) return "";
   const p = args.path ?? args.file_path ?? args.filePath;
-  const detail = p ? String(p).replace(/^\/home\/[^/]+\//, "~/")
+  const detail = p
+    ? String(p).replace(/^\/home\/[^/]+\//, "~/")
     : args.command || args.pattern || args.query || args.prompt || "";
   return String(detail).slice(0, 2000);
 }
@@ -77,7 +85,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerCommand("live-dashboard", {
-    description: "Enable live-dashboard telemetry globally; use 'off' to disable",
+    description:
+      "Enable live-dashboard telemetry globally; use 'off' to disable",
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
       if (action !== "" && action !== "on" && action !== "off") {
@@ -87,7 +96,10 @@ export default function (pi: ExtensionAPI) {
       mkdirSync(DIR, { recursive: true });
       writeFileSync(ENABLED_FILE, action === "off" ? "off\n" : "on\n");
       syncEnabled();
-      ctx.ui.notify(`Live-dashboard telemetry ${enabled ? "enabled" : "disabled"} globally`, "info");
+      ctx.ui.notify(
+        `Live-dashboard telemetry ${enabled ? "enabled" : "disabled"} globally`,
+        "info",
+      );
     },
   });
 
@@ -95,13 +107,19 @@ export default function (pi: ExtensionAPI) {
     state.startedAt = Date.now();
     state.session = basename(ctx.sessionManager.getCwd() || "pi");
     if (!watching) {
-      watchFile(ENABLED_FILE, { interval: 500, persistent: false }, syncEnabled);
+      watchFile(
+        ENABLED_FILE,
+        { interval: 500, persistent: false },
+        syncEnabled,
+      );
       watching = true;
     }
     syncEnabled();
     sniffAdvisorCost(ctx);
     void flush();
-    heartbeat ??= setInterval(() => { void flush(); }, 10_000);
+    heartbeat ??= setInterval(() => {
+      void flush();
+    }, 10_000);
   });
 
   // The omplike advisor runs its own in-process Agent (direct provider stream,
@@ -123,7 +141,9 @@ export default function (pi: ExtensionAPI) {
     // the footer only carries the cost, not the model
     let advisorModel = "advisor";
     try {
-      const modes = JSON.parse(readFileSync(join(homedir(), ".pi", "agent", "modes.json"), "utf8"));
+      const modes = JSON.parse(
+        readFileSync(join(homedir(), ".pi", "agent", "modes.json"), "utf8"),
+      );
       advisorModel = modes.modes?.advisor?.modelId ?? advisorModel;
     } catch {}
     ui.__liveDashboardSink = (delta: number) => {
@@ -222,7 +242,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", async (event) => {
-    const t = state.tools.find((t) => t.status === "running" && t.name === event.toolName);
+    const t = state.tools.find(
+      (t) => t.status === "running" && t.name === event.toolName,
+    );
     if (t) t.status = event.isError ? "error" : "done";
     flush();
   });

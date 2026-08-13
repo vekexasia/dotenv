@@ -14,12 +14,18 @@ const LABEL = "wait nvim";
 const METADATA_SOURCE = "user:opennvim";
 
 export const isOpenNvim = (toolName: string, command: unknown): boolean =>
-  toolName === "bash" && typeof command === "string" && command.includes("open-nvim.sh");
+  toolName === "bash" &&
+  typeof command === "string" &&
+  command.includes("open-nvim.sh");
 
 const label = (args: string[]) => {
   const pane = process.env.HERDR_PANE_ID;
   if (!pane) return;
-  execFile("herdr", ["pane", "report-metadata", pane, "--source", METADATA_SOURCE, ...args], () => {});
+  execFile(
+    "herdr",
+    ["pane", "report-metadata", pane, "--source", METADATA_SOURCE, ...args],
+    () => {},
+  );
 };
 
 export default function (pi: ExtensionAPI) {
@@ -28,7 +34,13 @@ export default function (pi: ExtensionAPI) {
   const pending = new Set<string>();
 
   pi.on("tool_execution_start", (event) => {
-    if (!isOpenNvim(event.toolName, (event.args as { command?: unknown })?.command)) return;
+    if (
+      !isOpenNvim(
+        event.toolName,
+        (event.args as { command?: unknown })?.command,
+      )
+    )
+      return;
     pending.add(event.toolCallId);
     pi.events.emit("herdr:blocked", { active: true, label: LABEL });
     label(["--state-label", `blocked=${LABEL}`]);
