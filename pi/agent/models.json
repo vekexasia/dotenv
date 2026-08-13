@@ -1,20 +1,5 @@
 {
   "providers": {
-    "anthropic": {
-      "models": [
-        {
-          "id": "claude-sonnet-5",
-          "name": "Claude Sonnet 5",
-          "api": "anthropic-messages",
-          "reasoning": true,
-          "input": ["text", "image"],
-          "contextWindow": 1000000,
-          "maxTokens": 64000,
-          "cost": { "input": 2, "output": 10, "cacheRead": 0.2, "cacheWrite": 2.5 },
-          "compat": { "forceAdaptiveThinking": true }
-        }
-      ]
-    },
     "openrouter": {
       "modelOverrides": {
         "deepseek/deepseek-v4-flash-0731": {

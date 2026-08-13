@@ -110,6 +110,7 @@ sync_pi
 npx skills add herdrdev/herdr --skill herdr --global --agent pi --copy --yes
 npx skills@latest add mattpocock/skills --skill triage grill-me grilling wayfinder domain-modeling prototype research --global --agent pi --copy --yes
 npx skills add https://github.com/pedronauck/skills --skill typescript-advanced --global --agent pi --copy --yes
+npx skills add humanlayer/skills --skill show-me --global --agent pi --copy --yes
 command -v herdr >/dev/null 2>&1 && herdr integration install pi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
