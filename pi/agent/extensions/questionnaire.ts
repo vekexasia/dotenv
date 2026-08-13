@@ -17,6 +17,7 @@ import {
   matchesKey,
   Text,
   truncateToWidth,
+  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 
@@ -32,6 +33,7 @@ interface Question {
   id: string;
   label: string;
   prompt: string;
+  recommendation?: string;
   options: QuestionOption[];
   allowOther: boolean;
 }
@@ -67,6 +69,9 @@ const QuestionSchema = Type.Object({
     }),
   ),
   prompt: Type.String({ description: "The full question text to display" }),
+  recommendation: Type.Optional(
+    Type.String({ description: "Optional recommended answer or choice" }),
+  ),
   options: Type.Array(QuestionOptionSchema, {
     description: "Available options to choose from",
   }),
@@ -101,6 +106,7 @@ export async function runQuestionnaire(
       id: string;
       label?: string;
       prompt: string;
+      recommendation?: string;
       options: QuestionOption[];
       allowOther?: boolean;
     }>;
@@ -137,6 +143,7 @@ export async function runQuestionnaire(
         let inputMode = false;
         let inputQuestionId: string | null = null;
         let cachedLines: string[] | undefined;
+        let cachedWidth: number | undefined;
         const answers = new Map<string, Answer>();
 
         const editorTheme: EditorTheme = {
@@ -153,6 +160,7 @@ export async function runQuestionnaire(
 
         function refresh() {
           cachedLines = undefined;
+          cachedWidth = undefined;
           tui.requestRender();
         }
 
@@ -297,12 +305,12 @@ export async function runQuestionnaire(
         }
 
         function render(width: number): string[] {
-          if (cachedLines) return cachedLines;
+          if (cachedLines && cachedWidth === width) return cachedLines;
 
           const lines: string[] = [];
           const q = currentQuestion();
           const opts = currentOptions();
-          const add = (s: string) => lines.push(truncateToWidth(s, width));
+          const add = (s: string) => lines.push(...wrapTextWithAnsi(s, width));
 
           add(theme.fg("accent", "─".repeat(width)));
 
@@ -351,6 +359,9 @@ export async function runQuestionnaire(
 
           if (inputMode && q) {
             add(theme.fg("text", ` ${q.prompt}`));
+            if (q.recommendation) {
+              add(theme.fg("muted", ` Recommendation: ${q.recommendation}`));
+            }
             lines.push("");
             renderOptions();
             lines.push("");
@@ -384,6 +395,9 @@ export async function runQuestionnaire(
             }
           } else if (q) {
             add(theme.fg("text", ` ${q.prompt}`));
+            if (q.recommendation) {
+              add(theme.fg("muted", ` Recommendation: ${q.recommendation}`));
+            }
             lines.push("");
             renderOptions();
           }
@@ -398,6 +412,7 @@ export async function runQuestionnaire(
           add(theme.fg("accent", "─".repeat(width)));
 
           cachedLines = lines;
+          cachedWidth = width;
           return lines;
         }
 
@@ -405,6 +420,7 @@ export async function runQuestionnaire(
           render,
           invalidate: () => {
             cachedLines = undefined;
+            cachedWidth = undefined;
           },
           handleInput,
         };

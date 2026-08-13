@@ -10,9 +10,3 @@
 
 # Public academic / reference URLs cited in skill documentation.
 ^https?://(www\.)?(dl\.acm\.org|docs\.astral\.sh|doi\.org|github\.com|ieeexplore\.ieee\.org|fightforthehuman\.com|joelonsoftware\.com|manning\.com|spinellis\.gr)(/.*)?$
-
-# Public provider API URLs and version identifier used by ha-quota.ts.
-^https://chatgpt\.com/backend-api/wham/usage$
-^https://api\.anthropic\.com/api/oauth/(profile|usage)$
-^https://api\.openai\.com/profile$
-^oauth-2025-04-20$

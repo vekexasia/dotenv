@@ -21,6 +21,7 @@ interface ExtractedQuestion {
   id: string;
   label?: string;
   prompt: string;
+  recommendation?: string;
   options: ExtractedQuestionOption[];
   allowOther?: boolean;
   context?: string;
@@ -39,6 +40,7 @@ The questionnaire tool has this parameter shape:
       "id": "Unique stable id, e.g. q1",
       "label": "Short tab label, e.g. Q1",
       "prompt": "The question text to show to the user",
+      "recommendation": "Optional direct recommendation explicitly made by the assistant for this question",
       "options": [
         {
           "value": "machine_readable_value",
@@ -63,6 +65,7 @@ Rules:
 - Set allowOther to true unless the question explicitly requires one of the listed choices only.
 - If there are no explicit choices, use "options": [] and "allowOther": true.
 - Include essential context in prompt, not in options.
+- If the assistant explicitly recommends an answer or choice for a question, copy that recommendation into recommendation. Omit recommendation otherwise.
 - If no questions are found, return {"questions": []}.`;
 
 const EXTRACTION_PROVIDER = "openai-codex";
@@ -221,6 +224,7 @@ export default function (pi: ExtensionAPI) {
         id: q.id || `q${i + 1}`,
         label: q.label || `Q${i + 1}`,
         prompt: q.context ? `${q.prompt}\n\n${q.context}` : q.prompt,
+        recommendation: q.recommendation,
         options: Array.isArray(q.options) ? q.options : [],
         allowOther: q.allowOther !== false,
       }));
