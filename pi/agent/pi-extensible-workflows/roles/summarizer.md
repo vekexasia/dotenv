@@ -1,9 +1,7 @@
 ---
 model: cheap-model
-tools: []
-disabledAgentResources:
-  skills:
-    - "**"
+tools: ["!*"]
+skills: ["!*"]
 description: Summarizing Agent. Use it when there is a need to summarize lot of data into comprehensive summary.
 overrideSystemPrompt: true
 contextFiles: []

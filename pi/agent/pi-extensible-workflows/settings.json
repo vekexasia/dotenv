@@ -7,23 +7,18 @@
     "tests-expert": "cheap-model",
     "developer-model": "cheap-model:xhigh"
   },
-  "disabledAgentResources": {
-    "skills": [
-      "**",
-      "!image-generation"
-    ],
-    "extensions": [
-      "**",
-      "!**/extensions/live-dashboard.ts",
-      "!**/pi-openai-fast/**",
-      "!**/pi-anthropic-oauth/**",
-      "!**/pi-codex-image/**",
-      "!**/pi-hashline-edit-pro/**",
-      "!**/@sting8k/pi-vcc/**",
-      "!**/pi-omplike-advisor/**"
-    ]
-  },
-  "extensions": {
+  "skills": ["!*", "image-generation"],
+  "extensions": [
+    "!*",
+    "**/extensions/live-dashboard.ts",
+    "**/pi-openai-fast/**",
+    "**/pi-anthropic-oauth/**",
+    "**/pi-codex-image/**",
+    "**/pi-hashline-edit-pro/**",
+    "**/@sting8k/pi-vcc/**",
+    "**/pi-omplike-advisor/**"
+  ],
+  "extensionSettings": {
     "herdr": { "enableFullyInspectableMode": false }
   }
 }
