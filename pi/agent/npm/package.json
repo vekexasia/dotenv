@@ -4,15 +4,15 @@
   "dependencies": {
     "@benvargas/pi-openai-fast": "^1.1.0",
     "@narumitw/pi-goal": "^0.51.0",
-    "@plannotator/pi-extension": "^0.27.1",
+    "@plannotator/pi-extension": "^0.27.3",
     "@sting8k/pi-vcc": "^0.6.0",
     "pi-anthropic-oauth": "^0.2.3",
     "pi-btw": "^0.4.1",
-    "pi-markdown-preview": "^0.14.0",
+    "pi-markdown-preview": "^0.14.1",
     "pi-orcarouter": "^0.1.0",
     "pi-tool-display": "^0.5.0",
     "pi-vim": "^0.14.1",
-    "pi-web-access": "^0.22.0",
-    "visual-explainer": "^0.8.1"
+    "pi-web-access": "^0.23.0",
+    "visual-explainer": "^0.9.0"
   }
 }
