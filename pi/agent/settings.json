@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.84.2",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-fable-5",
   "defaultThinkingLevel": "xhigh",
   "theme": "dark",
   "packages": [
@@ -30,8 +30,7 @@
     "npm:pi-orcarouter",
     "npm:@plannotator/pi-extension",
     "../../git/personale/pi-workflows/packages/extensions/herdr",
-    "npm:@benvargas/pi-openai-fast",
-    "../../git/personale/pi-workflows/packages/extensions/subagents"
+    "npm:@benvargas/pi-openai-fast"
   ],
   "skills": [
     "-skills/browser-use"

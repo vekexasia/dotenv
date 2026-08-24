@@ -19,6 +19,7 @@
     "**/pi-omplike-advisor/**"
   ],
   "extensionSettings": {
-    "herdr": { "enableFullyInspectableMode": false }
+    "herdr": { "enableFullyInspectableMode": false },
+    "trajectory": { "port": 8190 }
   }
 }

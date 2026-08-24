@@ -238,7 +238,8 @@ async function integrateIssue(
     );
     if (mainStatus.exitCode !== 0)
       return fail([shellFailure("main status", mainStatus)]);
-    if (mainStatus.stdout.trim()) return fail(["Main working tree is not clean"]);
+    if (mainStatus.stdout.trim())
+      return fail(["Main working tree is not clean"]);
 
     const mainHeadResult = await shell(
       'git -C "$PI_MAIN_PATH" rev-parse --verify HEAD',
@@ -341,7 +342,9 @@ Resolve any rebase conflicts in the current issue worktree, complete the integra
       options,
     );
     if (mainStatusAfterReview.exitCode !== 0)
-      return fail([shellFailure("main status after review", mainStatusAfterReview)]);
+      return fail([
+        shellFailure("main status after review", mainStatusAfterReview),
+      ]);
     if (mainStatusAfterReview.stdout.trim())
       return fail(["Main working tree changed during integration review"]);
     const mainHeadAfterReview = await shell(
@@ -349,7 +352,9 @@ Resolve any rebase conflicts in the current issue worktree, complete the integra
       options,
     );
     if (mainHeadAfterReview.exitCode !== 0)
-      return fail([shellFailure("main HEAD after review", mainHeadAfterReview)]);
+      return fail([
+        shellFailure("main HEAD after review", mainHeadAfterReview),
+      ]);
     if (mainHeadAfterReview.stdout.trim() !== capturedMainHead)
       return fail(["Main HEAD changed during integration review"]);
 
