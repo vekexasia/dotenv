@@ -2,7 +2,7 @@
   "enabled": true,
   "registerToolOverrides": {
     "read": false,
-    "grep": true,
+    "grep": false,
     "find": true,
     "ls": true,
     "bash": true,

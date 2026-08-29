@@ -44,12 +44,13 @@ function readJson(file: string): Record<string, unknown> {
   }
 }
 
-function keepToolDisplayOffRead(): void {
+function keepToolDisplayOffHashlineTools(): void {
   const config = readJson(toolDisplayConfigPath);
   const ownership = {
     ...((config.registerToolOverrides as Record<string, unknown> | undefined) ??
       {}),
     read: false,
+    grep: false,
   };
   const next = { ...config, registerToolOverrides: ownership };
   mkdirSync(dirname(toolDisplayConfigPath), { recursive: true });
@@ -78,7 +79,7 @@ function decorateInPlace(tool: BridgeTool): void {
 }
 
 export default function hashlineToolDisplayBridge(pi: ExtensionAPI): void {
-  keepToolDisplayOffRead();
+  keepToolDisplayOffHashlineTools();
 
   const originalRegisterTool = pi.registerTool;
   pi.registerTool = function registerToolWithHashlineDisplay(
