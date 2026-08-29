@@ -62,6 +62,7 @@ append_once 'export PATH="$PATH:/usr/local/go/bin"'
 append_once 'export PATH="$PATH:/opt/nvim-linux-x86_64/bin"'
 append_once 'eval "$(fzf --bash)"'
 append_once 'export BAT_THEME="TwoDark"'
+append_once 'export PI_ANTHROPIC_OAUTH_REWRITE_MODE="technical-safe"'
 append_once "alias ll='ls -alF'"
 append_once 'export SUDO_EDITOR="nvim"'
 append_once "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
