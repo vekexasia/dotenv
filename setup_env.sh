@@ -118,4 +118,5 @@ command -v pi >/dev/null 2>&1 && pi update --extensions
 command -v tsgo >/dev/null 2>&1 || npm install -g --prefix "$HOME/.local" @typescript/native-preview
 command -v tree-sitter >/dev/null 2>&1 || npm install -g --prefix "$HOME/.local" tree-sitter-cli
 "$nvim_bin" --headless "+Lazy! restore" +qa
+"$nvim_bin" --headless "+MasonInstall markdownlint" +qa
 "$nvim_bin" --headless "+lua require('nvim-treesitter').install({'bash','c','diff','html','lua','luadoc','markdown','markdown_inline','query','vim','vimdoc','typescript','javascript'}):wait(300000)" +qa
