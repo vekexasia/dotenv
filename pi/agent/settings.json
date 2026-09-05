@@ -32,9 +32,6 @@
     "../../git/personale/pi-workflows/packages/extensions/herdr",
     "npm:@benvargas/pi-openai-fast"
   ],
-  "skills": [
-    "-skills/browser-use"
-  ],
   "hideThinkingBlock": true,
   "showCacheMissNotices": true,
   "tuiMode": "regular"
