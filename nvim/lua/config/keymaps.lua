@@ -5,6 +5,11 @@ vim.keymap.set("n", "<leader>ej", vim.diagnostic.goto_next, { desc = "Next diagn
 vim.keymap.set("n", "<leader>ek", vim.diagnostic.goto_prev, { desc = "Previous diagnostic" })
 vim.keymap.set("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Open diagnostic quickfix list" })
 
+vim.keymap.set("x", "<leader>a", function()
+  vim.cmd('normal! "+y')
+  vim.fn.jobstart({ "herdr", "plugin", "action", "invoke", "annotate.capture" })
+end, { desc = "Annotate selection in Herdr" })
+
 -- Keep the old TypeScript shortcuts, now backed by vtsls code actions.
 vim.keymap.set("n", "<leader>tm", function()
   LazyVim.lsp.action["source.addMissingImports.ts"]()

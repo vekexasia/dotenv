@@ -64,6 +64,7 @@ append_once 'eval "$(fzf --bash)"'
 append_once 'export BAT_THEME="TwoDark"'
 append_once 'export PI_ANTHROPIC_OAUTH_REWRITE_MODE="technical-safe"'
 append_once "alias ll='ls -alF'"
+append_once "alias herdr-devbox='herdr --remote devbox-hz --remote-keybindings server'"
 append_once 'export SUDO_EDITOR="nvim"'
 append_once "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
 append_once "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
@@ -90,6 +91,9 @@ fi
 mkdir -p "$HOME/.config"
 rsync -a --delete --exclude=node_modules/ "$REPO_DIR/nvim/" "$HOME/.config/nvim/"
 install -Dm644 "$REPO_DIR/herdr/config.toml" "$HOME/.config/herdr/config.toml"
+if [ "$(hostname -s)" = "devbox" ]; then
+  sed -i '/^\[ui\]$/a copy_on_select = false' "$HOME/.config/herdr/config.toml"
+fi
 install -Dm644 "$REPO_DIR/.tmux.conf" "$HOME/.tmux.conf"
 
 if [ "$IS_WSL" -eq 1 ]; then
@@ -112,7 +116,11 @@ npx skills add herdrdev/herdr --skill herdr --global --agent pi --copy --yes
 npx skills@latest add mattpocock/skills --skill triage grill-me grilling wayfinder domain-modeling prototype research --global --agent pi --copy --yes
 npx skills add https://github.com/pedronauck/skills --skill typescript-advanced --global --agent pi --copy --yes
 npx skills add humanlayer/skills --skill show-me --global --agent pi --copy --yes
-command -v herdr >/dev/null 2>&1 && herdr integration install pi
+if command -v herdr >/dev/null 2>&1; then
+  [ -x /usr/local/bin/bun ] || sudo npm install -g --prefix /usr/local bun
+  herdr plugin install plannotator/herdr-annotate/lite --yes
+  herdr integration install pi
+fi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
 command -v tsgo >/dev/null 2>&1 || npm install -g --prefix "$HOME/.local" @typescript/native-preview

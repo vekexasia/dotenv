@@ -28,6 +28,24 @@ next_agent = "prefix+alt+n"
 open_notification_target = "prefix+o"
 last_pane = "prefix+tab"
 
+[[keys.command]]
+key = "prefix+a"
+type = "plugin_action"
+command = "annotate.capture"
+description = "annotate text"
+
+[[keys.command]]
+key = "prefix+shift+a"
+type = "plugin_action"
+command = "annotate.copy-context"
+description = "copy annotations as context"
+
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "annotate.manage"
+description = "manage annotations"
+
 [experimental]
 kitty_graphics = true
 
