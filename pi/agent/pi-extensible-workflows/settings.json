@@ -1,11 +1,13 @@
 {
   "modelAliases": {
     "old-reviewer-model": "xai/grok-4.5:high",
-    "reviewer-model": "anthropic/claude-opus-5:xhigh",
+    "reviewer-model": "anthropic/claude-fable-5-1:high",
     "cheap-model": "openai-codex/gpt-5.6-luna:high",
     "scout-model": "cheap-model",
     "tests-expert": "cheap-model",
-    "developer-model": "cheap-model:xhigh"
+    "developer-model": "cheap-model:xhigh",
+    "oracle-model": "cheap-model:xhigh",
+    "researcher-model": "cheap-model:xhigh"
   },
   "skills": ["!*", "image-generation"],
   "extensions": [
