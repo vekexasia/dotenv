@@ -87,13 +87,6 @@ return {
       opts.formatters_by_ft.typescriptreact = { "eslint_d_default" }
     end,
   },
-  {
-    "mfussenegger/nvim-lint",
-    opts = function(_, opts)
-      opts.linters_by_ft = opts.linters_by_ft or {}
-      opts.linters_by_ft.markdown = { "markdownlint" }
-    end,
-  },
   { "lukas-reineke/indent-blankline.nvim", main = "ibl", opts = {} },
   { "windwp/nvim-autopairs", event = "InsertEnter", opts = {} },
 
