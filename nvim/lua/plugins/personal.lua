@@ -1,9 +1,4 @@
 return {
-  -- Omarchy's LazyVim base already provides the integrations; these extras
-  -- keep the functionality from the previous Kickstart configuration.
-  { import = "lazyvim.plugins.extras.dap.core" },
-  { import = "lazyvim.plugins.extras.lang.typescript" },
-
   {
     "davidmh/mdx.nvim",
     dependencies = { "nvim-treesitter/nvim-treesitter" },
