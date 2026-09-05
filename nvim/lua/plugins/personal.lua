@@ -169,6 +169,31 @@ return {
   },
 
   {
+    "nvim-neo-tree/neo-tree.nvim",
+    opts = {
+      event_handlers = {
+        {
+          event = "file_opened",
+          handler = function()
+            -- ponytail: the fuzzy finder (/) re-navigates right after opening, so close on a
+            -- delay; raise the 150ms if a slow directory scan reopens the tree anyway.
+            vim.defer_fn(function()
+              require("neo-tree.command").execute({ action = "close" })
+            end, 150)
+          end,
+        },
+      },
+    },
+  },
+
+  {
+    "folke/snacks.nvim",
+    keys = {
+      { "<leader><leader>", function() Snacks.picker.buffers() end, desc = "Buffers" },
+    },
+  },
+
+  {
     "nvim-lualine/lualine.nvim",
     opts = function(_, opts)
       require("gpt4_tokens").setup()
@@ -178,6 +203,7 @@ return {
           return require("gpt4_tokens").section()
         end,
       })
+      opts.sections.lualine_z = {}
     end,
   },
 }
