@@ -176,6 +176,17 @@ if [ ! -x "$venv/bin/python" ]; then
   "$venv/bin/pip" install gigatoken
 fi
 
+if [ "$PACKAGE_MANAGER" = arch ]; then
+  # Omarchy activates mise globally, and its pi shim precedes ~/.local/bin in
+  # PATH while leaking mise output into pi's stdout. Own pi via npm instead.
+  grep -q mise "$HOME/.local/bin/pi" 2>/dev/null && rm -f "$HOME/.local/bin/pi"
+  if command -v mise >/dev/null 2>&1; then
+    mise unuse -g pi
+    mise uninstall --all pi
+  fi
+  npm install -g --ignore-scripts --prefix "$HOME/.local" @earendil-works/pi-coding-agent
+fi
+
 sync_pi
 npx skills add herdrdev/herdr --skill herdr --global --agent pi --copy --yes
 npx skills@latest add mattpocock/skills --skill triage grill-me grilling wayfinder domain-modeling prototype research --global --agent pi --copy --yes
