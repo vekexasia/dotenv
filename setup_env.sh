@@ -5,10 +5,39 @@ REPO_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 IS_WSL=0
 grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
 
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+fi
+
+case "${ID:-}:${ID_LIKE:-}" in
+  omarchy:*|*:arch*|arch:*)
+    PACKAGE_MANAGER=arch
+    ;;
+  debian:*|ubuntu:*|*:debian*)
+    PACKAGE_MANAGER=debian
+    ;;
+  *)
+    printf 'Unsupported Linux distribution: ID=%s ID_LIKE=%s\n' "${ID:-unknown}" "${ID_LIKE:-unknown}" >&2
+    exit 1
+    ;;
+esac
+
 install_package() {
   local command_name=$1 package_name=${2:-$1}
   command -v "$command_name" >/dev/null 2>&1 && return
-  sudo apt-get install -y "$package_name"
+  case "$PACKAGE_MANAGER" in
+    arch)
+      if command -v omarchy >/dev/null 2>&1; then
+        omarchy pkg add "$package_name"
+      else
+        sudo pacman -S --needed --noconfirm "$package_name"
+      fi
+      ;;
+    debian)
+      sudo apt-get install -y "$package_name"
+      ;;
+  esac
 }
 
 install_release() {
@@ -33,16 +62,37 @@ append_once() {
 
 sync_pi() {
   local target="$HOME/.pi/agent"
-  rm -rf "$target"
   mkdir -p "$HOME/.pi"
+
+  if [ -L "$target" ] && [ "$(readlink -f "$target")" = "$REPO_DIR/pi/agent" ]; then
+    return
+  fi
+
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    local backup="$target.backup.$(date +%s)"
+    mv -- "$target" "$backup"
+    printf 'Backed up existing Pi agent directory to %s\n' "$backup"
+  fi
+
   ln -s "$REPO_DIR/pi/agent" "$target"
 }
 
-sudo apt-get update
-for spec in \
-  'make:make' 'gcc:gcc' 'g++:g++' 'rg:ripgrep' 'git:git' 'curl:curl' 'xclip:xclip' 'jq:jq' \
-  'tree:tree' 'htop:htop' 'fdfind:fd-find' 'rsync:rsync' 'fzf:fzf' 'batcat:bat' \
-  'gh:gh' 'glab:glab' 'python3:python3' 'python3-venv:python3-venv'; do
+if [ "$PACKAGE_MANAGER" = debian ]; then
+  sudo apt-get update
+  package_specs=(
+    'make:make' 'gcc:gcc' 'g++:g++' 'rg:ripgrep' 'git:git' 'curl:curl' 'xclip:xclip' 'jq:jq'
+    'tree:tree' 'htop:htop' 'fdfind:fd-find' 'rsync:rsync' 'fzf:fzf' 'batcat:bat'
+    'gh:gh' 'glab:glab' 'python3:python3' 'python3-venv:python3-venv'
+  )
+else
+  package_specs=(
+    'make:make' 'gcc:gcc' 'g++:gcc' 'rg:ripgrep' 'git:git' 'curl:curl' 'xclip:xclip' 'jq:jq'
+    'tree:tree' 'htop:htop' 'fd:fd' 'rsync:rsync' 'fzf:fzf' 'bat:bat'
+    'gh:github-cli' 'glab:glab' 'python3:python'
+  )
+fi
+
+for spec in "${package_specs[@]}"; do
   install_package "${spec%%:*}" "${spec#*:}"
 done
 
@@ -54,8 +104,13 @@ fi
 mkdir -p "$HOME/.bin" "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$HOME/.bin:/usr/local/go/bin:/opt/nvim-linux-x86_64/bin:$PATH"
 command -v bat >/dev/null 2>&1 || ln -sf "$(command -v batcat)" "$HOME/.bin/bat"
-install_release jesseduffield/lazygit '_linux_x86_64\.tar\.gz$' lazygit
-install_release zellij-org/zellij '^zellij-x86_64-unknown-linux-musl\.tar\.gz$' zellij
+if [ "$PACKAGE_MANAGER" = arch ]; then
+  install_package lazygit lazygit
+  install_package zellij zellij
+else
+  install_release jesseduffield/lazygit '_linux_x86_64\.tar\.gz$' lazygit
+  install_release zellij-org/zellij '^zellij-x86_64-unknown-linux-musl\.tar\.gz$' zellij
+fi
 append_once 'export PATH="$HOME/.bin:$PATH"'
 append_once 'export PATH="$HOME/.local/bin:$PATH"'
 append_once 'export PATH="$PATH:/usr/local/go/bin"'
@@ -69,6 +124,10 @@ append_once 'export SUDO_EDITOR="nvim"'
 append_once "export FZF_ALT_C_OPTS=\"--walker-skip .git,node_modules,target --preview 'tree -C {}'\""
 append_once "export FZF_CTRL_T_OPTS=\"--walker-skip .git,node_modules,target --preview 'bat -n --color=always --style=numbers {}' --bind 'ctrl-/:change-preview-window(down|hidden|)'\""
 
+if ! command -v go >/dev/null 2>&1 && [ "$PACKAGE_MANAGER" = arch ]; then
+  install_package go go
+fi
+
 if ! command -v go >/dev/null 2>&1; then
   go_version=1.24.4
   archive=$(mktemp)
@@ -78,14 +137,20 @@ if ! command -v go >/dev/null 2>&1; then
   rm -f "$archive"
 fi
 
-nvim_bin=/opt/nvim-linux-x86_64/bin/nvim
-nvim_version=$([ -x "$nvim_bin" ] && "$nvim_bin" --version | head -1 | sed 's/^NVIM v//' || true)
-if [ "$(printf '%s\n' 0.12.0 "$nvim_version" | sort -V | head -1)" != 0.12.0 ]; then
+nvim_bin=$(command -v nvim || true)
+nvim_version=$([ -n "$nvim_bin" ] && "$nvim_bin" --version | head -1 | sed 's/^NVIM v//' || true)
+if [ -z "$nvim_version" ] || [ "$(printf '%s\n' 0.12.0 "$nvim_version" | sort -V | head -1)" != 0.12.0 ]; then
+  if [ "$PACKAGE_MANAGER" = arch ]; then
+    install_package nvim neovim
+    nvim_bin=$(command -v nvim)
+  else
   archive=$(mktemp)
   curl -fsSL https://github.com/neovim/neovim/releases/latest/download/nvim-linux-x86_64.tar.gz -o "$archive"
   sudo rm -rf /opt/nvim-linux-x86_64
   sudo tar -C /opt -xzf "$archive"
   rm -f "$archive"
+    nvim_bin=/opt/nvim-linux-x86_64/bin/nvim
+  fi
 fi
 
 mkdir -p "$HOME/.config"

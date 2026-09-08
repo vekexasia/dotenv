@@ -6,7 +6,7 @@
     "@narumitw/pi-goal": "^0.54.4",
     "@plannotator/pi-extension": "^0.27.12",
     "@sting8k/pi-vcc": "^0.7.1",
-    "pi-anthropic-oauth": "^0.2.3",
+    "pi-anthropic-oauth": "^0.2.4",
     "pi-btw": "^0.4.1",
     "pi-markdown-preview": "^0.16.0",
     "pi-orcarouter": "^0.1.0",
