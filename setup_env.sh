@@ -193,14 +193,26 @@ npx skills@latest add mattpocock/skills --skill triage grill-me grilling wayfind
 npx skills add https://github.com/pedronauck/skills --skill typescript-advanced --global --agent pi --copy --yes
 npx skills add humanlayer/skills --skill show-me --global --agent pi --copy --yes
 if command -v herdr >/dev/null 2>&1; then
-  [ -x /usr/local/bin/bun ] || sudo npm install -g --prefix /usr/local bun
+  [ -x /usr/local/bin/bun ] || sudo "$(command -v npm)" install -g --prefix /usr/local bun
   herdr plugin install plannotator/herdr-annotate/lite --yes
   herdr integration install pi
 fi
 command -v pi >/dev/null 2>&1 && pi update --extensions
 (cd "$HOME/.config/nvim" && npm ci)
 command -v tsgo >/dev/null 2>&1 || npm install -g --prefix "$HOME/.local" @typescript/native-preview
-command -v tree-sitter >/dev/null 2>&1 || npm install -g --prefix "$HOME/.local" tree-sitter-cli
+# tree-sitter-cli ships only an install.js that downloads the real binary in a
+# postinstall step. pi's npm policy blocks install scripts, so a plain install
+# leaves the package dir present but the binary missing, and Neovim -- which
+# spawns it by absolute path, not via PATH -- fails with ENOENT. Force scripts
+# for this one package, then verify/repair the exact binary Neovim will spawn.
+TS_CLI_BIN="$HOME/.local/lib/node_modules/tree-sitter-cli/tree-sitter"
+if [ ! -x "$TS_CLI_BIN" ]; then
+  npm install -g --prefix "$HOME/.local" --foreground-scripts --include=optional tree-sitter-cli
+fi
+if [ ! -x "$TS_CLI_BIN" ] && [ -f "$HOME/.local/lib/node_modules/tree-sitter-cli/install.js" ]; then
+  (cd "$HOME/.local/lib/node_modules/tree-sitter-cli" && node install.js)
+fi
+[ -x "$TS_CLI_BIN" ] || { printf 'tree-sitter binary missing after install: %s\n' "$TS_CLI_BIN" >&2; exit 1; }
 "$nvim_bin" --headless "+Lazy! restore" +qa
 "$nvim_bin" --headless "+MasonInstall markdownlint" +qa
 "$nvim_bin" --headless "+lua require('nvim-treesitter').install({'bash','c','diff','html','lua','luadoc','markdown','markdown_inline','query','vim','vimdoc','typescript','javascript'}):wait(300000)" +qa
