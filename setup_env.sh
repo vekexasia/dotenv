@@ -192,6 +192,12 @@ npx skills add herdrdev/herdr --skill herdr --global --agent pi --copy --yes
 npx skills@latest add mattpocock/skills --skill triage grill-me grilling wayfinder domain-modeling prototype research --global --agent pi --copy --yes
 npx skills add https://github.com/pedronauck/skills --skill typescript-advanced --global --agent pi --copy --yes
 npx skills add humanlayer/skills --skill show-me --global --agent pi --copy --yes
+npx skills@latest add micio86dev/Engineering-Excellence --skill engineering-excellence --global --agent pi --copy --yes
+
+# AI coding CLIs — installed only when missing, via each tool's official installer.
+command -v gentle-ai >/dev/null 2>&1 || curl -fsSL https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/scripts/install.sh | bash
+command -v agy >/dev/null 2>&1 || curl -fsSL https://antigravity.google/cli/install.sh | bash
+command -v codex >/dev/null 2>&1 || curl -fsSL https://chatgpt.com/codex/install.sh | sh
 if command -v herdr >/dev/null 2>&1; then
   [ -x /usr/local/bin/bun ] || sudo npm install -g --prefix /usr/local bun
   herdr plugin install plannotator/herdr-annotate/lite --yes
