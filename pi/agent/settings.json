@@ -20,9 +20,9 @@
     "npm:@narumitw/pi-goal",
     "git:github.com/DietrichGebert/ponytail",
     "packages/pi-omplike-advisor",
+    "packages/pi-codex-context",
     "npm:pi-tool-display",
     "git:github.com/vekexasia/pi-notify@feat/customizable-notifications",
-    "npm:@sting8k/pi-vcc",
     "../../git/personale/pi-workflows",
     "../../git/personale/pi-workflows/packages/extensions/herdr",
     "git:github.com/gotgenes/pi-anthropic-auth"
