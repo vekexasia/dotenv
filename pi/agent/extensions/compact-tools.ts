@@ -2,10 +2,9 @@
 /**
  * Compact rendering for read and edit tools.
  *
- * pi-hashline-edit owns those tools but defines no custom renderer,
- * so Pi falls back to the verbose built-in. We monkey-patch
- * ToolExecutionComponent.prototype.updateDisplay to intercept those
- * two tools and render a single compact line instead.
+ * Pi's built-in tools fall back to verbose output. We monkey-patch
+ * ToolExecutionComponent.prototype.updateDisplay to render them compactly.
+ * and render them as a single compact line instead.
  *
  * When expanded (ctrl+o) the original updateDisplay runs normally.
  */

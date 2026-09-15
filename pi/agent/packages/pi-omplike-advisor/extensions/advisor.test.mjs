@@ -1848,15 +1848,15 @@ test("TUI model picker Escape cancels without persisting a session model entry",
 	assert.deepEqual(picker.entries, []);
 });
 
-test("advisor agent uses an extension-defined provider stream", async () => {
+test("advisor agent sends OpenCode session headers through its provider stream", async () => {
 	setDefaultStreamFn(() => { throw new Error("fallback stream should not be used"); });
 	const calls = [];
 	const model = {
-		provider: "custom-provider",
-		id: "custom-model",
-		name: "Custom model",
-		api: "custom-api",
-		baseUrl: "https://custom.example",
+		provider: "opencode-go",
+		id: "deepseek-v4-flash",
+		name: "DeepSeek V4 Flash",
+		api: "openai-completions",
+		baseUrl: "https://opencode.ai/zen/go/v1",
 		reasoning: false,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1883,7 +1883,7 @@ test("advisor agent uses an extension-defined provider stream", async () => {
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "silent review" }],
-					api: "custom-api",
+					api: "openai-completions",
 					provider: streamModel.provider,
 					model: streamModel.id,
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
@@ -1908,6 +1908,7 @@ test("advisor agent uses an extension-defined provider stream", async () => {
 				env: { CUSTOM_ENV: "yes" },
 			}),
 		},
+		sessionId: "advisor-session",
 		adviseTool: new A.AdviseTool(() => true),
 	});
 	try {
@@ -1915,10 +1916,14 @@ test("advisor agent uses an extension-defined provider stream", async () => {
 		assert.equal(calls.length, 1);
 		assert.deepEqual(calls[0], {
 			receiver: provider,
-			model: "custom-provider/custom-model",
-			baseUrl: "https://custom.example",
+			model: "opencode-go/deepseek-v4-flash",
+			baseUrl: "https://opencode.ai/zen/go/v1",
 			apiKey: "oauth-token",
-			headers: { authorization: "Bearer oauth-token" },
+			headers: {
+				"x-opencode-session": "advisor-session",
+				"x-opencode-client": "pi",
+				authorization: "Bearer oauth-token",
+			},
 			env: { CUSTOM_ENV: "yes" },
 		});
 	} finally {

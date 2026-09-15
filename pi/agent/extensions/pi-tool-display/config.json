@@ -1,6 +1,0 @@
-{
-  "registerToolOverrides": {
-    "read": false,
-    "grep": false
-  }
-}

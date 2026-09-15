@@ -118,7 +118,6 @@ npx skills add https://github.com/pedronauck/skills --skill typescript-advanced 
 npx skills add humanlayer/skills --skill show-me --global --agent pi --copy --yes
 if command -v herdr >/dev/null 2>&1; then
   [ -x /usr/local/bin/bun ] || sudo npm install -g --prefix /usr/local bun
-  herdr plugin install plannotator/herdr-annotate/lite --yes
   herdr integration install pi
 fi
 command -v pi >/dev/null 2>&1 && pi update --extensions

@@ -13,10 +13,8 @@
   "extensions": [
     "!*",
     "**/extensions/live-dashboard.ts",
-    "**/pi-openai-fast/**",
-    "**/pi-anthropic-oauth/**",
+    "**/pi-anthropic-auth/**",
     "**/pi-codex-image/**",
-    "**/pi-hashline-edit-pro/**",
     "**/@sting8k/pi-vcc/**",
     "**/pi-omplike-advisor/**"
   ],
