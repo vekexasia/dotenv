@@ -29,5 +29,8 @@
   ],
   "hideThinkingBlock": true,
   "showCacheMissNotices": true,
-  "tuiMode": "regular"
+  "tuiMode": "regular",
+  "compaction": {
+    "enabled": true
+  }
 }

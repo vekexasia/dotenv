@@ -376,7 +376,7 @@ export function installAdvisor(pi: ExtensionAPI, inheritedState: AdvisorSessionS
 			thinkingLevel,
 			systemPrompt: loadSystemPrompt(ctx.cwd, advisorPath),
 			modelRegistry: ctx.modelRegistry,
-			sessionId: activeSessionId,
+			sessionId: activeSessionId || undefined,
 			adviseTool: builtAdviseTool,
 		});
 		// ADVISOR_COMPACT_AT: % of the advisor's context window at which it self-

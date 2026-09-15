@@ -1848,15 +1848,15 @@ test("TUI model picker Escape cancels without persisting a session model entry",
 	assert.deepEqual(picker.entries, []);
 });
 
-test("advisor agent sends OpenCode session headers through its provider stream", async () => {
+test("advisor agent forwards OpenCode session attribution to extension provider streams", async () => {
 	setDefaultStreamFn(() => { throw new Error("fallback stream should not be used"); });
 	const calls = [];
 	const model = {
 		provider: "opencode-go",
-		id: "deepseek-v4-flash",
-		name: "DeepSeek V4 Flash",
-		api: "openai-completions",
-		baseUrl: "https://opencode.ai/zen/go/v1",
+		id: "custom-model",
+		name: "Custom model",
+		api: "custom-api",
+		baseUrl: "https://custom.example",
 		reasoning: false,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -1869,6 +1869,8 @@ test("advisor agent sends OpenCode session headers through its provider stream",
 				receiver: this,
 				model: `${streamModel.provider}/${streamModel.id}`,
 				baseUrl: streamModel.baseUrl,
+				modelHeaders: streamModel.headers,
+				sessionId: options?.sessionId,
 				apiKey: options?.apiKey,
 				headers: options?.headers,
 				env: options?.env,
@@ -1883,7 +1885,7 @@ test("advisor agent sends OpenCode session headers through its provider stream",
 				message: {
 					role: "assistant",
 					content: [{ type: "text", text: "silent review" }],
-					api: "openai-completions",
+					api: "custom-api",
 					provider: streamModel.provider,
 					model: streamModel.id,
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
@@ -1899,6 +1901,7 @@ test("advisor agent sends OpenCode session headers through its provider stream",
 		model,
 		thinkingLevel: "off",
 		systemPrompt: "Review the turn.",
+		sessionId: "advisor-session",
 		modelRegistry: {
 			getProvider: (id) => id === model.provider ? provider : undefined,
 			getApiKeyAndHeaders: async () => ({
@@ -1908,7 +1911,6 @@ test("advisor agent sends OpenCode session headers through its provider stream",
 				env: { CUSTOM_ENV: "yes" },
 			}),
 		},
-		sessionId: "advisor-session",
 		adviseTool: new A.AdviseTool(() => true),
 	});
 	try {
@@ -1916,14 +1918,12 @@ test("advisor agent sends OpenCode session headers through its provider stream",
 		assert.equal(calls.length, 1);
 		assert.deepEqual(calls[0], {
 			receiver: provider,
-			model: "opencode-go/deepseek-v4-flash",
-			baseUrl: "https://opencode.ai/zen/go/v1",
+			model: "opencode-go/custom-model",
+			baseUrl: "https://custom.example",
+			modelHeaders: { "x-opencode-session": "advisor-session", "x-opencode-client": "pi" },
+			sessionId: "advisor-session",
 			apiKey: "oauth-token",
-			headers: {
-				"x-opencode-session": "advisor-session",
-				"x-opencode-client": "pi",
-				authorization: "Bearer oauth-token",
-			},
+			headers: { authorization: "Bearer oauth-token" },
 			env: { CUSTOM_ENV: "yes" },
 		});
 	} finally {

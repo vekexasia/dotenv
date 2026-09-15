@@ -2,12 +2,11 @@
   "providers": {
     "openrouter": {
       "modelOverrides": {
-        "deepseek/deepseek-v4-flash-0731": {
+        "deepseek/deepseek-v4.1-flash": {
           "compat": {
             "openRouterRouting": {
-              "only": ["deepinfra"],
-              "allow_fallbacks": false,
-              "quantizations": ["fp4"]
+              "only": ["deepseek"],
+              "allow_fallbacks": false
             }
           }
         }

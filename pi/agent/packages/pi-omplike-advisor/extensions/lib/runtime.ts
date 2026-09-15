@@ -28,22 +28,22 @@ export function buildAdvisorAgent(opts: {
 	adviseTool: AdviseTool;
 }): Agent {
 	const readOnly = createReadOnlyTools(opts.cwd);
-	const thinkingLevel = opts.model.reasoning ? (opts.thinkingLevel as any) : ("off" as any);
-	// OpenCode uses a known API tag but still requires Pi's session headers;
-	// unknown API tags require their extension-defined provider stream.
-	const needsProviderStream =
-		opts.model.provider === "opencode" ||
-		opts.model.provider === "opencode-go" ||
-		(!!opts.model.api && !getApiProvider(opts.model.api));
+	const model = opts.sessionId && (opts.model.provider === "opencode" || opts.model.provider === "opencode-go")
+		? { ...opts.model, headers: { "x-opencode-session": opts.sessionId, "x-opencode-client": "pi", ...opts.model.headers } }
+		: opts.model;
+	const thinkingLevel = model.reasoning ? (opts.thinkingLevel as any) : ("off" as any);
+	const needsProviderStream = !!model.api && !getApiProvider(model.api);
 	return new Agent({
 		initialState: {
 			systemPrompt: opts.systemPrompt,
-			model: opts.model,
+			model,
 			thinkingLevel,
 			tools: [opts.adviseTool, ...readOnly] as any,
 		},
-		convertToLlm,
 		sessionId: opts.sessionId,
+		convertToLlm,
+		// Unknown API tags belong to extension-defined providers (for example
+		// xai-auth's `xai-responses`); route only those through the provider stream.
 		...(needsProviderStream ? {
 			streamFn: (model: Model<any>, context: any, options: any) => lazyStream(model, async () => {
 				const activeProvider = opts.modelRegistry.getProvider?.(model.provider);
@@ -52,12 +52,7 @@ export function buildAdvisorAgent(opts: {
 					throw new Error("Custom advisor providers require ModelRegistry.getApiKeyAndHeaders");
 				const auth = await opts.modelRegistry.getApiKeyAndHeaders(model);
 				if (!auth.ok) throw new Error(auth.error);
-				const opencodeHeaders = options?.sessionId && (model.provider === "opencode" || model.provider === "opencode-go")
-					? { "x-opencode-session": options.sessionId, "x-opencode-client": "pi" }
-					: undefined;
-				const headers = auth.headers || opencodeHeaders || options?.headers
-					? { ...opencodeHeaders, ...auth.headers, ...options?.headers }
-					: undefined;
+				const headers = auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined;
 				const env = auth.env || options?.env ? { ...auth.env, ...options?.env } : undefined;
 				return activeProvider.streamSimple(model, context, {
 					...options,
