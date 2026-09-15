@@ -37,11 +37,11 @@
 For complex work use the workflow tool. You should pick the proper agent per task unless specified. Check model aliases.
 Do not use other models unless requested by the user.
 
-Prefer an existing workflow function when it matches the task; inspect `workflow_catalog` first. Before calling the workflow tool, write the executable JavaScript workflow script to `/tmp`, including calls to any existing workflow functions; never substitute a JSON tool invocation. Open the script with `~/.pi/agent/bin/open-nvim.sh <path>` for operator review. Never alter operator edits. 
+Prefer an existing workflow function when it matches the task; When uncertain open the script with `~/.pi/agent/bin/open-nvim.sh <path>` for operator review. Never alter operator edits. 
 
 When using workflow, unless specified, launch it in foreground and without any kind of budget limits.
 
 ## Other preferences
 Also:
-- Prefer herdr for long-running interactive commands that need to survive context switches.
+- Prefer spawning herdr pane/tab for long-running interactive commands that need to survive context switches.
 - Name sessions clearly, capture logs, and inspect output instead of polling/sleeping.
