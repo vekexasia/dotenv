@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "benchmark": "node test/replay-benchmark.mjs"
   },
   "pi": {
     "extensions": [
@@ -14,7 +15,7 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-coding-agent": ">=0.85.1",
     "typebox": "*"
   },
   "devDependencies": {

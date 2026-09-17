@@ -24,6 +24,7 @@ export const extension = loaded.default ?? loaded;
 export async function createHarness(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pi-codex-context-test-"));
   const manager = options.manager ?? SessionManager.create(dir, dir);
+  await options.setupManager?.(manager, dir);
   const settings = SettingsManager.inMemory({
     compaction: {
       enabled: true,
@@ -35,6 +36,21 @@ export async function createHarness(options = {}) {
   const baseModel = getModel("anthropic", "claude-sonnet-4-5");
   const model = { ...baseModel, contextWindow: options.contextWindow ?? 80_000, maxTokens: 512 };
   const providerRequests = [];
+  const lifecycleEvents = [];
+  const lifecycleObserver = (pi) => {
+    pi.on("session_before_tree", (event) => {
+      lifecycleEvents.push({ kind: "before_tree", eventType: event.type, targetId: event.preparation.targetId });
+    });
+    pi.on("session_tree", (event) => {
+      lifecycleEvents.push({ kind: "tree", eventType: event.type, newLeafId: event.newLeafId, oldLeafId: event.oldLeafId, leafAfterHooks: manager.getLeafId() });
+    });
+    pi.on("session_compact", (event) => {
+      lifecycleEvents.push({ kind: "compact", eventType: event.type, reason: event.reason });
+    });
+    pi.on("session_compact_failed", (event) => {
+      lifecycleEvents.push({ kind: "compact_failed", eventType: event.type, reason: event.reason, aborted: event.aborted });
+    });
+  };
   const loader = new DefaultResourceLoader({
     cwd: dir,
     agentDir: dir,
@@ -45,7 +61,10 @@ export async function createHarness(options = {}) {
     noThemes: true,
     noContextFiles: true,
     extensionFactories: [
+      ...(options.beforeExtensions ?? []),
       extension,
+      lifecycleObserver,
+      ...(options.afterExtensions ?? []),
       (pi) => pi.registerProvider("anthropic", {
         api: "anthropic-messages",
         models: [model],
@@ -55,7 +74,7 @@ export async function createHarness(options = {}) {
         },
       }),
     ],
-    systemPromptOverride: () => "Test system prompt.",
+    systemPromptOverride: () => options.systemPrompt ?? "Test system prompt.",
   });
   await loader.reload();
   const modelRuntime = await ModelRuntime.create({
@@ -112,6 +131,7 @@ export async function createHarness(options = {}) {
     responses,
     extensionErrors,
     providerRequests,
+    lifecycleEvents,
     async close() {
       session.dispose();
       await rm(dir, { recursive: true, force: true });

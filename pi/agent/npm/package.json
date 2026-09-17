@@ -3,9 +3,9 @@
   "private": true,
   "dependencies": {
     "@narumitw/pi-goal": "^0.54.5",
-    "@sting8k/pi-vcc": "^0.7.2",
-    "pi-btw": "^0.4.1",
-    "pi-markdown-preview": "^0.16.0",
+    "@sting8k/pi-vcc": "^0.7.3",
+    "pi-btw": "^0.5.0",
+    "pi-markdown-preview": "^0.17.0",
     "pi-tool-display": "^0.5.0",
     "pi-vim": "^0.14.2",
     "pi-web-access": "^0.29.0"

@@ -9,15 +9,20 @@ import {
 import {
   commitExplicitWindow,
   ensureSeed,
+  hasValidAssistantUsage,
   poison,
   poisonReason,
+  prepareExplicitReset,
   prepareWindowCompaction,
   projectedMessages,
+  recoverExplicitReset,
+  reanchorTree,
+  staticOverhead,
   validateOwnedCompactions,
 } from "./window-driver.js";
 
 const pendingResets = new WeakMap<object, string>();
-const STATIC_ESTIMATE_TOKENS = 12_000;
+const pendingTreeTargets = new WeakMap<object, string>();
 
 function fatalMessage(reason: string): AgentMessage {
   return {
@@ -85,10 +90,9 @@ export default function codexContext(pi: ExtensionAPI): void {
       const state = currentState(ctx);
       const messages = projectedMessages(ctx.sessionManager, state);
       const usage = ctx.getContextUsage();
-      const hasCurrentAssistant = messages.some((message) => message.role === "assistant");
-      const estimated = hasCurrentAssistant && usage?.tokens != null
+      const estimated = hasValidAssistantUsage(messages) && usage?.tokens != null
         ? usage.tokens
-        : STATIC_ESTIMATE_TOKENS + messages.reduce((total, message) => total + estimateTokens(message), 0);
+        : staticOverhead(pi, ctx) + messages.reduce((total, message) => total + estimateTokens(message), 0);
       const contextWindow = ctx.model?.contextWindow ?? usage?.contextWindow ?? 0;
       return { tokens_left: Math.max(0, contextWindow - estimated), context_window: contextWindow };
     },
@@ -103,15 +107,24 @@ export default function codexContext(pi: ExtensionAPI): void {
       if (calls.length !== 1 || calls[0]!.id !== toolCallId || calls[0]!.name !== "new_context") {
         throw new Error("new_context must be the only tool call in the assistant response");
       }
+      prepareExplicitReset(pi, ctx.sessionManager, toolCallId);
       pendingResets.set(ctx.sessionManager, toolCallId);
     },
   });
 
+  pi.on("session_before_tree", async (event, ctx) => {
+    pendingTreeTargets.set(ctx.sessionManager, event.preparation.targetId);
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     try {
-      const violation = validateOwnedCompactions(ctx.sessionManager.getBranch());
+      const violation = validateOwnedCompactions(ctx.sessionManager.getEntries());
       if (violation) throw new Error(violation);
       ensureSeed(pi, ctx.sessionManager);
+      recoverExplicitReset(pi, ctx.sessionManager);
+      const recoveredViolation = validateOwnedCompactions(ctx.sessionManager.getEntries());
+      if (recoveredViolation) throw new Error(recoveredViolation);
+      currentState(ctx);
     } catch (error) {
       poison(ctx.sessionManager, error);
     }
@@ -119,10 +132,17 @@ export default function codexContext(pi: ExtensionAPI): void {
 
   pi.on("session_tree", async (_event, ctx) => {
     pendingResets.delete(ctx.sessionManager);
+    const targetId = pendingTreeTargets.get(ctx.sessionManager);
+    pendingTreeTargets.delete(ctx.sessionManager);
     try {
-      const violation = validateOwnedCompactions(ctx.sessionManager.getBranch());
+      const violation = validateOwnedCompactions(ctx.sessionManager.getEntries());
       if (violation) throw new Error(violation);
-      ensureSeed(pi, ctx.sessionManager);
+      if (targetId) reanchorTree(pi, ctx.sessionManager, targetId);
+      else ensureSeed(pi, ctx.sessionManager);
+      recoverExplicitReset(pi, ctx.sessionManager);
+      const reanchoredViolation = validateOwnedCompactions(ctx.sessionManager.getEntries());
+      if (reanchoredViolation) throw new Error(reanchoredViolation);
+      currentState(ctx);
     } catch (error) {
       poison(ctx.sessionManager, error);
     }
@@ -158,7 +178,7 @@ export default function codexContext(pi: ExtensionAPI): void {
     }
     if (committed || poisonReason(ctx.sessionManager) || event.message.role !== "assistant") return;
     const contextWindow = ctx.model?.contextWindow;
-    if (!contextWindow) return;
+    if (!contextWindow || !event.message.usage) return;
     const remaining = contextWindow - calculateContextTokens(event.message.usage);
     if (remaining > Math.max(32_000, Math.floor(contextWindow * 0.1))) return;
     const state = deriveWindowState(ctx.sessionManager.getBranch());
@@ -196,9 +216,18 @@ export default function codexContext(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on("session_compact_failed", async (_event, ctx) => {
+    try {
+      const violation = validateOwnedCompactions(ctx.sessionManager.getEntries());
+      if (violation) throw new Error(violation);
+    } catch (error) {
+      poison(ctx.sessionManager, error);
+    }
+  });
+
   pi.on("session_compact", async (event, ctx) => {
     try {
-      const violation = validateOwnedCompactions(ctx.sessionManager.getBranch());
+      const violation = validateOwnedCompactions(ctx.sessionManager.getEntries());
       if (violation) throw new Error(violation);
       const details = event.compactionEntry.details;
       if (!details || typeof details !== "object" || (details as Record<string, unknown>).owner !== "pi-codex-context") {
