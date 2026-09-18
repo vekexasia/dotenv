@@ -1,0 +1,9 @@
+{
+  "provider": "openai",
+  "workflow": "none",
+  "geminiApiKey": "!cat /home/andrea/.config/pi/gemini-api-key",
+  "youtube": { "enabled": true },
+  "video": { "enabled": false },
+  "githubClone": { "enabled": false },
+  "githubPrIssue": { "enabled": false }
+}

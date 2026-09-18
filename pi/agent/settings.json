@@ -25,7 +25,8 @@
     "../../git/personale/pi-workflows",
     "../../git/personale/pi-workflows/packages/extensions/herdr",
     "git:github.com/gotgenes/pi-anthropic-auth",
-    "npm:@sting8k/pi-vcc"
+    "npm:@sting8k/pi-vcc",
+    "npm:@ff-labs/pi-fff"
   ],
   "hideThinkingBlock": true,
   "showCacheMissNotices": true,

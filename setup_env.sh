@@ -112,6 +112,9 @@ if [ ! -x "$venv/bin/python" ]; then
 fi
 
 sync_pi
+# pi-web-access reads $XDG_CONFIG_HOME/pi/web-search.json when XDG_CONFIG_HOME is set.
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/pi"
+ln -sf "$REPO_DIR/pi/agent/web-search.json" "${XDG_CONFIG_HOME:-$HOME/.config}/pi/web-search.json"
 npx skills add herdrdev/herdr --skill herdr --global --agent pi --copy --yes
 npx skills@latest add mattpocock/skills --skill triage grill-me grilling wayfinder domain-modeling prototype research --global --agent pi --copy --yes
 npx skills add https://github.com/pedronauck/skills --skill typescript-advanced --global --agent pi --copy --yes

@@ -1,6 +1,6 @@
 ---
 model: developer-model
-tools: ["!*", read, find, ls, bash, replace, undo_last_change, view_image]
+tools: ["!*", read, grep, find, ls, bash, edit, write, view_image]
 description: Developer focused agent
 skills: [tigerstyle, typescript-advanced]
 ---
