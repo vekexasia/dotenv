@@ -3,7 +3,6 @@
 
 # Public package names used by extensions.
 (?i)mariozechner
-(?i)^pi-web-access$
 (?i)^@mariozechner/pi-coding-agent$
 ^\"?@sinclair/typebox\"?$
 (?i)^ExtensionAPI$

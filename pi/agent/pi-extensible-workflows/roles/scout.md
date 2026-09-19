@@ -1,7 +1,7 @@
 ---
 model: scout-model
-tools: ["!*", read, grep, find, bash, web_search, get_search_content, fetch_content]
-extensions: ["**/pi-web-access/**"]
+tools: ["!*", read, grep, find, bash, web_search]
+extensions: ["**/light-web-search.ts"]
 description: Scouting agent. Use when we need to gather info to solve a task
 contextFiles: []
 overrideSystemPrompt: true
