@@ -19,18 +19,28 @@
     "npm:@narumitw/pi-goal",
     "git:github.com/DietrichGebert/ponytail",
     "packages/pi-omplike-advisor",
-    "npm:pi-tool-display",
     "git:github.com/vekexasia/pi-notify@feat/customizable-notifications",
     "../../git/personale/pi-workflows",
     "../../git/personale/pi-workflows/packages/extensions/herdr",
     "git:github.com/gotgenes/pi-anthropic-auth",
     "npm:@sting8k/pi-vcc",
-    "npm:@ff-labs/pi-fff"
+    "npm:@vanillagreen/pi-tool-renderer"
   ],
   "hideThinkingBlock": true,
   "showCacheMissNotices": true,
   "tuiMode": "regular",
   "compaction": {
     "enabled": true
+  },
+  "kendex": {
+    "extensionManager": {
+      "config": {
+        "@vanillagreen/pi-tool-renderer": {
+          "alignAssistantMessages": false,
+          "styledCodeBlocks": false,
+          "registerBatchTool": false
+        }
+      }
+    }
   }
 }
