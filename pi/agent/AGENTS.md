@@ -41,6 +41,8 @@ Prefer an existing workflow function when it matches the task; When uncertain op
 
 When using workflow, unless specified, launch it in foreground and without any kind of budget limits.
 
+When creating temp files in /tmp folder make sure to clear them out if they have served their purpose and are no longer needed.
+
 ## Other preferences
 Also:
 - Prefer spawning herdr pane/tab for long-running interactive commands that need to survive context switches.

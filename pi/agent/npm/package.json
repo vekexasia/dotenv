@@ -4,7 +4,7 @@
   "dependencies": {
     "@ff-labs/pi-fff": "^0.10.6",
     "@narumitw/pi-goal": "^0.54.8",
-    "@router-for-me/pi-cliproxyapi-provider": "^1.4.18",
+    "@router-for-me/pi-cliproxyapi-provider": "^1.4.19",
     "@sting8k/pi-vcc": "^0.8.0",
     "@vanillagreen/pi-tool-renderer": "^2.0.2",
     "pi-btw": "^0.6.0",

@@ -12,7 +12,6 @@
   "extensions": [
     "!*",
     "**/extensions/live-dashboard.ts",
-    "**/pi-anthropic-auth/**",
     "**/pi-codex-image/**",
     "**/@sting8k/pi-vcc/**",
     "**/pi-omplike-advisor/**"
