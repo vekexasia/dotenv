@@ -199,35 +199,13 @@ function getStatusLabel(
   return label || undefined;
 }
 
-function applyFooter(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  notifyState: { active: boolean; blinkOn: boolean },
-): void {
+function applyFooter(pi: ExtensionAPI, ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
   ctx.ui.setFooter((tui, theme, footerData) => {
     const unsub = footerData.onBranchChange(() => tui.requestRender());
 
-    let blinkTimer: ReturnType<typeof setInterval> | null = null;
     let maxAnimationTimer: ReturnType<typeof setInterval> | null = null;
     let maxAnimationFrame = 0;
-
-    function startBlink(): void {
-      if (blinkTimer) return;
-      notifyState.blinkOn = true;
-      blinkTimer = setInterval(() => {
-        notifyState.blinkOn = !notifyState.blinkOn;
-        tui.requestRender();
-      }, 600);
-    }
-
-    function stopBlink(): void {
-      if (blinkTimer) {
-        clearInterval(blinkTimer);
-        blinkTimer = null;
-      }
-      notifyState.blinkOn = false;
-    }
 
     function isMaxThinking(): boolean {
       try {
@@ -258,39 +236,10 @@ function applyFooter(
       maxAnimationFrame = 0;
     }
 
-    function dismissOnKeypress(): void {
-      const onData = (data: Buffer) => {
-        const str = data.toString();
-        // Ignore terminal focus reporting sequences (\e[I / \e[O)
-        if (str.includes("\x1b[I") || str.includes("\x1b[O")) {
-          process.stdin.once("data", onData);
-          return;
-        }
-        notifyState.active = false;
-        stopBlink();
-        tui.requestRender();
-      };
-      process.stdin.once("data", onData);
-    }
-
-    const unsubFired = pi.events.on("pi-notify:fired", () => {
-      notifyState.active = true;
-      startBlink();
-      dismissOnKeypress();
-      tui.requestRender();
-    });
-
-    notifyState.stopBlink = stopBlink;
-
-    // Restore blink if already active (e.g. after session switch)
-    if (notifyState.active) startBlink();
-
     return {
       dispose() {
-        stopBlink();
         stopMaxAnimation();
         unsub();
-        unsubFired();
       },
       invalidate() {},
       render(width: number): string[] {
@@ -312,11 +261,6 @@ function applyFooter(
         if (maxThinkingSupported && isMaxThinking()) startMaxAnimation();
         else stopMaxAnimation();
 
-        const bell =
-          notifyState.active && notifyState.blinkOn
-            ? ` ${theme.fg("warning", "🔔")}`
-            : "";
-
         const left = [
           theme.fg("dim", "⟪ "),
           theme.fg("muted", branch),
@@ -330,7 +274,6 @@ function applyFooter(
           accessFlags(theme, activeTools),
           " ",
           capabilityFlags(theme, availableTools),
-          bell,
           theme.fg("dim", " ⟫"),
         ].join("");
 
@@ -350,21 +293,8 @@ function applyFooter(
 }
 
 export default function registerFooterExtension(pi: ExtensionAPI): void {
-  const notifyState = {
-    active: false,
-    blinkOn: false,
-    stopBlink: (() => {}) as () => void,
-  };
-
-  pi.on("agent_start", (_event, ctx) => {
-    notifyState.active = false;
-    notifyState.blinkOn = false;
-    notifyState.stopBlink();
-    applyFooter(pi, ctx, notifyState);
-  });
-
-  pi.on("session_start", (_event, ctx) => applyFooter(pi, ctx, notifyState));
-  pi.on("session_switch", (_event, ctx) => applyFooter(pi, ctx, notifyState));
-  pi.on("session_branch", (_event, ctx) => applyFooter(pi, ctx, notifyState));
-  pi.on("model_select", (_event, ctx) => applyFooter(pi, ctx, notifyState));
+  pi.on("session_start", (_event, ctx) => applyFooter(pi, ctx));
+  pi.on("session_switch", (_event, ctx) => applyFooter(pi, ctx));
+  pi.on("session_branch", (_event, ctx) => applyFooter(pi, ctx));
+  pi.on("model_select", (_event, ctx) => applyFooter(pi, ctx));
 }
