@@ -2,5 +2,7 @@
   "overrideDefaultCompaction": true,
   "debug": false,
   "smartKeepTail": true,
-  "continueAfterThresholdCompact": true
+  "continueAfterThresholdCompact": true,
+  "skipForProviders": [],
+  "skipCustomTypes": []
 }

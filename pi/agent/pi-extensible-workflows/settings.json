@@ -1,8 +1,7 @@
 {
   "modelAliases": {
-    "old-reviewer-model": "xai/grok-4.5:high",
-    "reviewer-model": "anthropic/claude-fable-5-1:high",
-    "cheap-model": "openai-codex/gpt-5.6-luna:high",
+    "reviewer-model": "cliproxyapi/claude-opus-5-5:high",
+    "cheap-model": "cliproxyapi/gpt-6-luna:high",
     "scout-model": "cheap-model",
     "tests-expert": "cheap-model",
     "developer-model": "cheap-model:xhigh",
