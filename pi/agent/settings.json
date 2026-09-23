@@ -50,5 +50,13 @@
         }
       }
     }
-  }
+  },
+  "enabledModels": [
+    "cliproxyapi/claude-opus-5-5",
+    "cliproxyapi/claude-fable-5-1",
+    "cliproxyapi/gpt-6-sol",
+    "cliproxyapi/gpt-6-astra",
+    "cliproxyapi/gpt-6-luna",
+    "opencode-go/deepseek-v4.1-flash"
+  ]
 }
