@@ -22,7 +22,7 @@
     "../../git/personale/pi-workflows",
     "../../git/personale/pi-workflows/packages/extensions/herdr",
     "npm:@sting8k/pi-vcc",
-    "npm:@vanillagreen/pi-tool-renderer",
+    "packages/pi-tool-renderer",
     {
       "source": "npm:@router-for-me/pi-cliproxyapi-provider",
       "extensions": [
