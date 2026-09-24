@@ -21,6 +21,7 @@
     "packages/pi-omplike-advisor",
     "../../git/personale/pi-workflows",
     "../../git/personale/pi-workflows/packages/extensions/herdr",
+    "git:github.com/gotgenes/pi-anthropic-auth",
     "npm:@sting8k/pi-vcc",
     "packages/pi-tool-renderer",
     {
