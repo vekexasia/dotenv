@@ -14,7 +14,8 @@
     "**/extensions/live-dashboard.ts",
     "**/pi-codex-image/**",
     "**/@sting8k/pi-vcc/**",
-    "**/pi-omplike-advisor/**"
+    "**/pi-omplike-advisor/**",
+    "**/pi-cliproxyapi-provider/extensions/index.ts"
   ],
   "extensionSettings": {
     "herdr": { "enableFullyInspectableMode": false },
