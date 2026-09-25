@@ -52,7 +52,6 @@ if [ "$IS_WSL" -eq 1 ]; then
 fi
 
 mkdir -p "$HOME/.bin" "$HOME/.local/bin"
-ln -sfn "$REPO_DIR/.local/bin/b2" "$HOME/.local/bin/b2"
 export PATH="$HOME/.local/bin:$HOME/.bin:/usr/local/go/bin:/opt/nvim-linux-x86_64/bin:$PATH"
 command -v bat >/dev/null 2>&1 || ln -sf "$(command -v batcat)" "$HOME/.bin/bat"
 install_release jesseduffield/lazygit '_linux_x86_64\.tar\.gz$' lazygit
