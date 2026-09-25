@@ -323,7 +323,7 @@ export function isGitDiffCommand(command: unknown): boolean {
 	const normalized = command.replace(/\\\r?\n/g, " ").replace(/\s+/g, " ").trim();
 	// Match common shell forms such as `git diff`, `git --no-pager diff`,
 	// `git -C repo diff`, `env GIT_PAGER=cat git diff`, and chained commands.
-	return /(?:^|[;&|()]\s*)(?:(?:env\s+(?:-\S+\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)|(?:command\s+))*git(?:\s+(?!--?diff\b)(?:-[A-Za-z]\S*|--\S+)(?:\s+(?!diff(?:\s|$))\S+)*)*\s+diff(?:\s|$)/.test(normalized);
+	return /(?:^|[;&|()]\s*)(?:(?:env\s+(?:-\S+\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)|(?:command\s+))*git(?:\s+(?!--?diff\b)(?:-[A-Za-z]\S*|--\S+)(?:\s+(?!diff(?:\s|$))\S+)*)?\s+diff(?:\s|$)/.test(normalized);
 }
 
 export function readOnlyCallText(toolName: string, args: any, theme: any, cwd?: string, hyperlinks?: boolean): string {
