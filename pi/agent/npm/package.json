@@ -6,8 +6,7 @@
     "@narumitw/pi-goal": "^0.54.8",
     "@router-for-me/pi-cliproxyapi-provider": "^1.4.19",
     "@sting8k/pi-vcc": "^0.8.0",
-    "@vanillagreen/pi-tool-renderer": "^2.0.2",
-    "pi-btw": "^0.6.0",
+    "pi-btw": "^0.6.1",
     "pi-markdown-preview": "^0.17.0",
     "pi-vim": "^0.14.2"
   }
