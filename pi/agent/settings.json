@@ -31,7 +31,7 @@
       ]
     }
   ],
-  "hideThinkingBlock": true,
+  "hideThinkingBlock": false,
   "showCacheMissNotices": true,
   "tuiMode": "regular",
   "compaction": {
