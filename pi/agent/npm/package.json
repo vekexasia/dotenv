@@ -4,10 +4,10 @@
   "dependencies": {
     "@ff-labs/pi-fff": "^0.10.6",
     "@narumitw/pi-goal": "^0.54.8",
-    "@router-for-me/pi-cliproxyapi-provider": "^1.4.19",
+    "@router-for-me/pi-cliproxyapi-provider": "^1.4.20",
     "@sting8k/pi-vcc": "^0.8.0",
     "pi-btw": "^0.6.1",
-    "pi-markdown-preview": "^0.17.0",
+    "pi-markdown-preview": "^0.19.0",
     "pi-vim": "^0.14.2"
   }
 }
