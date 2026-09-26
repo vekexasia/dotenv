@@ -1,9 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
-const PROVIDER = "openai-codex";
+const PROVIDERS = ["cliproxyapi", "openai-codex"];
 const MODEL_ID = "gpt-5.6-luna";
-const RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const TIMEOUT_MS = 60_000;
 
 const parameters = Type.Object({
@@ -253,17 +252,18 @@ function extractAnswer(output: unknown[]): string {
   return parts.join("\n").trim();
 }
 
-async function resolveAuth(ctx: ExtensionContext): Promise<{ apiKey: string; headers: Record<string, string> }> {
-  let model = ctx.modelRegistry.find(PROVIDER, MODEL_ID);
+async function resolveAuth(ctx: ExtensionContext, provider: string): Promise<{ apiKey: string; headers: Record<string, string>; url: string }> {
+  let model = ctx.modelRegistry.find(provider, MODEL_ID);
   if (!model) {
     await ctx.modelRegistry.refresh();
-    model = ctx.modelRegistry.find(PROVIDER, MODEL_ID);
+    model = ctx.modelRegistry.find(provider, MODEL_ID);
   }
-  if (!model) throw new Error(`${PROVIDER}/${MODEL_ID} is not registered`);
+  if (!model) throw new Error(`${provider}/${MODEL_ID} is not registered`);
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) throw new Error(auth.error);
-  if (!auth.apiKey) throw new Error(`No credentials for ${PROVIDER}/${MODEL_ID}`);
-  return { apiKey: auth.apiKey, headers: auth.headers ?? {} };
+  if (!auth.apiKey) throw new Error(`No credentials for ${provider}/${MODEL_ID}`);
+  const baseUrl = (auth.baseUrl ?? model.baseUrl).replace(/\/+$/, "");
+  return { apiKey: auth.apiKey, headers: auth.headers ?? {}, url: `${baseUrl}/codex/responses` };
 }
 
 type SearchOutput = { answer: string; sources: Source[] };
@@ -272,11 +272,11 @@ async function runSearch(
   query: string,
   params: Parameters,
   signal: AbortSignal,
-  auth: { apiKey: string; headers: Record<string, string> },
+  auth: { apiKey: string; headers: Record<string, string>; url: string },
   headers: Record<string, string>,
 ): Promise<SearchOutput> {
   const filters = domainFilters(params.domainFilter);
-  const response = await fetch(RESPONSES_URL, {
+  const response = await fetch(auth.url, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -308,9 +308,21 @@ async function runSearch(
 async function search(params: Parameters, signal: AbortSignal | undefined, ctx: ExtensionContext) {
   const query = searchText(params);
   if (!query) return errorResult("No query provided. Use 'query' or 'queries'.");
-  signal?.throwIfAborted();
+  const errors: string[] = [];
+  for (const provider of PROVIDERS) {
+    signal?.throwIfAborted();
+    try {
+      return await searchWith(provider, query, params, signal, ctx);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      errors.push(`${provider}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(errors.join("; "));
+}
 
-  const auth = await resolveAuth(ctx);
+async function searchWith(provider: string, query: string, params: Parameters, signal: AbortSignal | undefined, ctx: ExtensionContext) {
+  const auth = await resolveAuth(ctx, provider);
   const headers: Record<string, string> = {
     ...auth.headers,
     Authorization: `Bearer ${auth.apiKey}`,
@@ -333,7 +345,7 @@ async function search(params: Parameters, signal: AbortSignal | undefined, ctx: 
   if (!result.answer && !result.sources.length) throw new Error("Codex returned no answer or sources");
   return {
     content: [{ type: "text" as const, text: result.answer || result.sources.map((source) => `${source.title}: ${source.url}`).join("\n") }],
-    details: { model: MODEL_ID, sources: result.sources },
+    details: { provider, model: MODEL_ID, sources: result.sources },
   };
 }
 
