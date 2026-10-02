@@ -140,6 +140,7 @@ export function registerRead(pi: ExtensionAPI, agent: any, cwd: string): void {
 		label: "read",
 		description: original.description,
 		parameters: original.parameters,
+		outputSchema: original.outputSchema,
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			return getBuiltInTool(agent, contextCwd(context, cwd), "read").execute(id, params, signal, onUpdate);
 		},
@@ -179,6 +180,7 @@ export function registerBash(pi: ExtensionAPI, agent: any, cwd: string): void {
 		label: "bash",
 		description: original.description,
 		parameters: original.parameters,
+		outputSchema: original.outputSchema,
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			return getBuiltInTool(agent, contextCwd(context, cwd), "bash").execute(id, params, signal, onUpdate);
 		},
@@ -255,6 +257,7 @@ export function registerEdit(pi: ExtensionAPI, agent: any, cwd: string): void {
 		label: "edit",
 		description: original.description,
 		parameters: original.parameters,
+		outputSchema: original.outputSchema,
 		// Pi's agent loop prepares arguments before schema validation; the
 		// replacement definition has to carry the hook or the shapes Pi's own
 		// tool accepts fail validation before execute() can delegate.
@@ -305,6 +308,7 @@ export function registerWrite(pi: ExtensionAPI, agent: any, cwd: string): void {
 		label: "write",
 		description: original.description,
 		parameters: original.parameters,
+		outputSchema: original.outputSchema,
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			const effectiveCwd = contextCwd(context, cwd);
 			const targetPath = params?.path ?? params?.file_path;
@@ -356,6 +360,7 @@ export function registerReadOnly(pi: ExtensionAPI, agent: any, cwd: string, tool
 		label: toolName,
 		description: original.description,
 		parameters: original.parameters,
+		outputSchema: original.outputSchema,
 		async execute(id: string, params: any, signal: AbortSignal | undefined, onUpdate: unknown, context: any) {
 			return getBuiltInTool(agent, contextCwd(context, cwd), toolName).execute(id, params, signal, onUpdate);
 		},
