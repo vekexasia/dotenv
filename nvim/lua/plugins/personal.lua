@@ -188,6 +188,7 @@ return {
 
   {
     "folke/snacks.nvim",
+    opts = { bigfile = { notify = false, line_length = math.huge } },
     keys = {
       { "<leader><leader>", function() Snacks.picker.buffers() end, desc = "Buffers" },
     },
