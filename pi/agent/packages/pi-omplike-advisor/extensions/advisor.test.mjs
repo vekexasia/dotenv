@@ -39,7 +39,8 @@ process.once("exit", () => rmSync(TEST_AGENT_DIR, { recursive: true, force: true
 const PI_BIN = execSync("command -v pi").toString().trim();
 // PI_DIST overrides bin-based resolution (needed when `pi` is a wrapper script
 // rather than a symlink into the install, e.g. pointing at a pi-mono checkout).
-const DIST = process.env.PI_DIST ?? dirname(execSync(`readlink -f ${PI_BIN}`).toString().trim());
+const PI_BIN_DIR = dirname(execSync(`readlink -f ${PI_BIN}`).toString().trim());
+const DIST = process.env.PI_DIST ?? (existsSync(join(PI_BIN_DIR, "core/extensions/loader.js")) ? PI_BIN_DIR : dirname(PI_BIN_DIR));
 // The test process is not Pi, so provide the same runtime entrypoint the child bridge sees.
 process.argv[1] = join(DIST, "cli.js");
 const { createExtensionRuntime, loadExtensions } = await import(`${DIST}/core/extensions/loader.js`);
@@ -188,9 +189,10 @@ test("advisor bridge resolves the installed launcher path", () => {
 test("workflow advisor bridge respects ordered extension exclusions", () => {
 	const spec = A.resolveAdvisorBridgeSpec(PI_BIN);
 	assert.ok(spec);
-	assert.equal(A.advisorResourceAllowed(["**"], spec.advisorPath), false);
-	assert.equal(A.advisorResourceAllowed(["**", "!**/pi-omplike-advisor/**"], spec.advisorPath), true);
-	assert.equal(A.advisorResourceAllowed(["**", "!**/pi-omplike-advisor/**", "**/pi-omplike-advisor/**"], spec.advisorPath), false);
+	assert.equal(A.advisorResourceAllowed([], spec.advisorPath), true);
+	assert.equal(A.advisorResourceAllowed(["!*"], spec.advisorPath), false);
+	assert.equal(A.advisorResourceAllowed(["!*", "**/pi-omplike-advisor/**"], spec.advisorPath), true);
+	assert.equal(A.advisorResourceAllowed(["!*", "**/pi-omplike-advisor/**", "!**/pi-omplike-advisor/**"], spec.advisorPath), false);
 });
 
 test("workflow advisor bridge is self-contained and loads the real extension", async () => {
@@ -1614,10 +1616,10 @@ test("workflow hook does not bypass an excluded advisor extension", async () => 
 	const hook = WORKFLOW_CORE.loadingRegistry().agentSetupHooks().find(({ name }) => name === "piOmplikeAdvisor");
 	assert.ok(hook);
 	const setup = (extensions) => ({ sessionInput: { resourcePolicy: { effective: { extensions } } } });
-	const excluded = setup(["**"]);
+	const excluded = setup(["!*"]);
 	await hook.setup(excluded, { run: { sessionId: "workflow-policy", runId: "policy-excluded" } });
 	assert.equal(excluded.sessionInput.extensionFactories, undefined);
-	const allowed = setup(["**", "!**/pi-omplike-advisor/**"]);
+	const allowed = setup(["!*", "**/pi-omplike-advisor/**"]);
 	await hook.setup(allowed, { run: { sessionId: "workflow-policy", runId: "policy-allowed" } });
 	assert.equal(allowed.sessionInput.extensionFactories.length, 1);
 	await parent.shutdown();

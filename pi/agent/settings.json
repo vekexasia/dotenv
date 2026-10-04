@@ -1,17 +1,11 @@
 {
-  "lastChangelogVersion": "0.87.1",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
-  "defaultThinkingLevel": "xhigh",
+  "lastChangelogVersion": "1.0.2",
+  "defaultProvider": "cliproxyapi",
+  "defaultModel": "gpt-6.1-sol",
+  "defaultThinkingLevel": "medium",
   "theme": "dark",
   "packages": [
     "git:github.com/vekexasia/chrome-cdp-skill@feat/cdp-ws-url",
-    {
-      "source": "git:github.com/vekexasia/pi-high-availability",
-      "extensions": [
-        "-extensions/index.ts"
-      ]
-    },
     "npm:pi-btw",
     "git:github.com/vekexasia/pi-codex-image@fix-codex-image-generation-output",
     "npm:pi-vim",
@@ -51,9 +45,11 @@
   "enabledModels": [
     "cliproxyapi/claude-opus-5-5",
     "cliproxyapi/claude-fable-5-1",
-    "cliproxyapi/gpt-6-sol",
+    "opencode-go/deepseek-v4.1-flash",
+    "cliproxyapi/gpt-6.1-sol",
+    "cliproxyapi/gpt-5.6-luna",
     "cliproxyapi/gpt-6-astra",
-    "cliproxyapi/gpt-6-luna",
-    "opencode-go/deepseek-v4.1-flash"
-  ]
+    "opencode-go/gpt-6-luna"
+  ],
+  "deviceId": "03e0217a-77f8-40a5-a131-e37c6dfab74b"
 }

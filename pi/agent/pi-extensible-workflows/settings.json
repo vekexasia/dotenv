@@ -3,12 +3,12 @@
     "reviewer-model": "cliproxyapi/claude-opus-5-5:high",
     "cheap-model-ant": "cliproxyapi/claude-sonnet-5-5:medium",
     "cheap-model-oai": "cliproxyapi/gpt-5.6-luna:high",
-    "cheap-model": "cheap-model-ant",
-    "scout-model": "cheap-model-ant",
-    "tests-expert": "cheap-model-ant",
+    "cheap-model": "cheap-model-oai",
+    "scout-model": "cheap-model-oai",
+    "tests-expert": "cheap-model-oai",
     "developer-model": "cliproxyapi/gpt-6.1-sol:high",
     "oracle-model": "cliproxyapi/gpt-6.1-sol:xhigh",
-    "researcher-model": "cheap-model-ant:xhigh"
+    "researcher-model": "cheap-model-oai:xhigh"
   },
   "skills": ["!*", "image-generation"],
   "extensions": [

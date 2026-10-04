@@ -11,7 +11,7 @@ import { copyAdvisorSessionState } from "./advisor-core.js";
 import type { AdvisorSessionState } from "./advisor-core.js";
 
 export type WorkflowCore = { registerWorkflowExtension?: (extension: unknown) => void };
-type WorkflowUtils = { disabledResources?: (patterns: readonly string[], resources: readonly string[]) => string[] };
+type WorkflowUtils = { selectResourcesByLayers?: (layers: readonly (readonly string[])[], resources: readonly string[]) => string[] };
 export type AdvisorBridgeSpec = { advisorPath: string; jitiPath: string; aliases: Readonly<Record<string, string>> };
 export type AdvisorExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 type WorkflowAdvisorState = {
@@ -94,9 +94,9 @@ export function resolveAdvisorBridgeSpec(advisorPath: string, entrypoint = proce
 }
 export function advisorResourceAllowed(advisorPath: string, patterns: readonly string[]): boolean {
 	if (!patterns.length) return true;
-	const disabledResources = loadWorkflowUtils()?.disabledResources;
-	if (typeof disabledResources !== "function") return false;
-	return disabledResources(patterns, [advisorPath]).length === 0;
+	const selectResourcesByLayers = loadWorkflowUtils()?.selectResourcesByLayers;
+	if (typeof selectResourcesByLayers !== "function") return false;
+	return selectResourcesByLayers([patterns], [advisorPath]).length === 1;
 }
 
 export function createAdvisorBridgeFactory(state: AdvisorSessionState, spec: AdvisorBridgeSpec | undefined): AdvisorExtensionFactory | undefined {
