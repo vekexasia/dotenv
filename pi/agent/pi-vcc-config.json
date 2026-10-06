@@ -4,5 +4,6 @@
   "smartKeepTail": true,
   "continueAfterThresholdCompact": true,
   "skipForProviders": [],
-  "skipCustomTypes": []
+  "skipCustomTypes": [],
+  "trackCommands": []
 }
