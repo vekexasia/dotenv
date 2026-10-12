@@ -1,9 +1,12 @@
 {
-  "lastChangelogVersion": "1.0.2",
+  "lastChangelogVersion": "1.1.0",
   "defaultProvider": "cliproxyapi",
   "defaultModel": "gpt-6.1-sol",
   "defaultThinkingLevel": "medium",
   "theme": "dark",
+  "extensions": [
+    "/home/andrea/git/personale/dott/pi-extension/dott-bridge.ts"
+  ],
   "packages": [
     "git:github.com/vekexasia/chrome-cdp-skill@feat/cdp-ws-url",
     "npm:pi-btw",
@@ -11,10 +14,10 @@
     "npm:pi-vim",
     "npm:pi-markdown-preview",
     "npm:@narumitw/pi-goal",
-    "git:github.com/DietrichGebert/ponytail",
     "packages/pi-omplike-advisor",
-    "../../git/personale/pi-workflows",
-    "../../git/personale/pi-workflows/packages/extensions/herdr",
+    "/home/andrea/git/personale/pi-workflows",
+    "/home/andrea/git/personale/pi-workflows/packages/extensions/herdr",
+    "/home/andrea/git/personale/pi-ext-roles",
     "git:github.com/gotgenes/pi-anthropic-auth",
     "npm:@sting8k/pi-vcc",
     "packages/pi-tool-renderer",

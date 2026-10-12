@@ -1,24 +1,4 @@
 {
-  "modelAliases": {
-    "reviewer-model": "cliproxyapi/claude-opus-5-5:high",
-    "cheap-model-ant": "cliproxyapi/claude-sonnet-5-5:medium",
-    "cheap-model-oai": "cliproxyapi/gpt-5.6-luna:high",
-    "cheap-model": "cheap-model-ant",
-    "scout-model": "cheap-model-ant",
-    "tests-expert": "cheap-model-oai",
-    "developer-model": "cheap-model-ant",
-    "oracle-model": "reviewer-model",
-    "researcher-model": "cheap-model-oai:xhigh"
-  },
-  "skills": ["!*", "image-generation"],
-  "extensions": [
-    "!*",
-    "**/extensions/live-dashboard.ts",
-    "**/pi-codex-image/**",
-    "**/@sting8k/pi-vcc/**",
-    "**/pi-omplike-advisor/**",
-    "**/pi-cliproxyapi-provider/extensions/index.ts"
-  ],
   "extensionSettings": {
     "herdr": { "enableFullyInspectableMode": false },
     "trajectory": { "port": 8190 }

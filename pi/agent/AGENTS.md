@@ -11,6 +11,7 @@
 - No sycophancy, closing fluff, emojis, em dashes, smart quotes, or decorative Unicode.
 - No boilerplate unless requested.
 - Respect human-review gates. Stop and wait when requested.
+- Unless otherwise specified, you should test your implementation before asking for human review.
 
 ## Code Rules
 
