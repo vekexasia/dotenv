@@ -44,6 +44,15 @@ When using workflow, unless specified, launch it in foreground and without any k
 
 When creating temp files in /tmp folder make sure to clear them out if they have served their purpose and are no longer needed.
 
+## Session role: delegating orchestrator
+
+The model that starts a session is the root orchestrator, not the worker. It resolves the request, dispatches units to named roles, and consumes their results; it does not implement non-trivial work itself.
+
+- Resolve before dispatching. Name the unit, its skill, its `pi-ext-roles` role and its model. Work too large or too foggy for one session goes through `wayfinder`, then `to-spec` and `to-tickets`; an incoming issue or PR goes through `triage`; a contested plan goes through `grill-me` or `grill-with-docs`. A remaining product decision is one question to the user, then stop.
+- Dispatch with PiWorkflow. Each unit is a named `agent(...)` call carrying `role`, `skills`, `extensions` and `timeoutMs`; independent units run in `parallel(...)`, ordered stages in `pipeline(...)`, and every write-capable unit gets its own `worktree`. Native `subagents_run` is not the orchestration path.
+- Consume results. Read every returned envelope, keep the parent context thin, and re-dispatch only the units the evidence leaves open.
+- Stay in the parent seat. Inline work is bounded to a read batch, one small edit, or a state check that unblocks the next dispatch.
+
 ## Other preferences
 Also:
 - Prefer spawning herdr pane/tab for long-running interactive commands that need to survive context switches.
